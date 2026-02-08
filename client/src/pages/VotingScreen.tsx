@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { getSocket } from '../utils/socket';
 import { Timer } from '../components/Timer';
@@ -25,6 +25,12 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
 
   // Voter must be same gender as question author (they judge opposite gender answers)
   const canVote = user.gender === author?.gender;
+
+  // Reset local selection state when the question changes (new voting round).
+  useEffect(() => {
+    setSelectedId(null);
+    setVoted(false);
+  }, [question.id]);
 
   const handleVote = () => {
     if (!selectedId) return;

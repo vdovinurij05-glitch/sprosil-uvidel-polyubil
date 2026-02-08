@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { getSocket } from '../utils/socket';
 import { Timer } from '../components/Timer';
@@ -18,6 +18,12 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
 
   const question = sessionState.currentQuestion;
   const isMyQuestion = question.authorId === user.id;
+
+  // Reset local input state when the question changes (new round).
+  useEffect(() => {
+    setAnswer('');
+    setSubmitted(false);
+  }, [question.id]);
 
   // Find author
   const allPlayers = [...sessionState.males, ...sessionState.females];

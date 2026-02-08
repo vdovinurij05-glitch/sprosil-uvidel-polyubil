@@ -10,8 +10,8 @@ const userSockets = new Map<string, string>();
 // Track session rooms
 const sessionUsers = new Map<string, Set<string>>();
 
-// Round timers
-const roundTimers = new Map<string, NodeJS.Timeout>();
+// Round timers (timeout + interval) to avoid multiple overlapping tickers.
+const roundTimers = new Map<string, { timeout: NodeJS.Timeout; interval: NodeJS.Timeout }>();
 
 export function setupSocketHandlers(io: Server) {
   // Set up game service callbacks
@@ -164,9 +164,18 @@ export function setupSocketHandlers(io: Server) {
 }
 
 function setRoundTimer(io: Server, sessionId: string, seconds: number, phase: 'answer' | 'vote') {
-  // Clear existing timer
-  const existing = roundTimers.get(`${sessionId}:${phase}`);
-  if (existing) clearTimeout(existing);
+  const key = `${sessionId}:${phase}`;
+
+  // Clear existing timer + interval
+  const existing = roundTimers.get(key);
+  if (existing) {
+    clearTimeout(existing.timeout);
+    clearInterval(existing.interval);
+    roundTimers.delete(key);
+  }
+
+  // Emit initial value immediately so UI doesn't show stale seconds from previous phase.
+  io.to(`session:${sessionId}`).emit('timer:tick', { phase, remaining: seconds });
 
   // Emit countdown
   const startTime = Date.now();
@@ -182,7 +191,7 @@ function setRoundTimer(io: Server, sessionId: string, seconds: number, phase: 'a
 
   const timer = setTimeout(async () => {
     clearInterval(interval);
-    roundTimers.delete(`${sessionId}:${phase}`);
+    roundTimers.delete(key);
     try {
       await gameService.forceAdvanceRound(sessionId);
     } catch (error) {
@@ -190,5 +199,5 @@ function setRoundTimer(io: Server, sessionId: string, seconds: number, phase: 'a
     }
   }, seconds * 1000);
 
-  roundTimers.set(`${sessionId}:${phase}`, timer);
+  roundTimers.set(key, { timeout: timer, interval });
 }
