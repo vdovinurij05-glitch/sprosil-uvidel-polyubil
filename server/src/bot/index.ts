@@ -7,7 +7,7 @@ export function createBot(): Telegraf {
   const bot = new Telegraf(config.BOT_TOKEN);
 
   bot.start((ctx) => {
-    const webAppUrl = config.WEBAPP_URL;
+    const webAppUrl = `${config.WEBAPP_URL}/?v=${Date.now()}`;
 
     ctx.reply(
       '💘 Добро пожаловать в «Спросил, увидел, полюбил»!\n\n' +
