@@ -13,6 +13,7 @@ import { createBot } from './bot';
 import userRoutes from './routes/user';
 import sessionRoutes from './routes/session';
 import reportRoutes from './routes/report';
+import devRoutes from './routes/dev';
 
 async function main() {
   // Express
@@ -38,6 +39,7 @@ async function main() {
   app.use('/api/user', userRoutes);
   app.use('/api/session', sessionRoutes);
   app.use('/api/report', reportRoutes);
+  app.use('/api/dev', devRoutes);
 
   // Socket.IO
   const io = new Server(server, {
