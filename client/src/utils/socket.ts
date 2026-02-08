@@ -1,6 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+// Default to same-origin in production (nginx proxies /socket.io -> server).
+const fallbackHost = typeof window !== 'undefined' ? window.location.host : 'localhost:3001';
+const fallbackProto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_URL = import.meta.env.VITE_WS_URL || `${fallbackProto}://${fallbackHost}`;
 
 let socket: Socket | null = null;
 

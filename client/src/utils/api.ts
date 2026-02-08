@@ -1,4 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Default to same-origin in production (nginx proxies /api -> server).
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 let initData = '';
 
