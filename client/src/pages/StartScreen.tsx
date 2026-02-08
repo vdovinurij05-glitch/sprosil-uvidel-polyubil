@@ -20,8 +20,12 @@ export const StartScreen: React.FC<StartScreenProps> = ({ initData }) => {
     setLoading(true);
     const socket = getSocket(initData);
 
-    socket.emit('lobby:join', { question: question.trim() }, (res: any) => {
+    socket.timeout(10000).emit('lobby:join', { question: question.trim() }, (err: Error | null, res: any) => {
       setLoading(false);
+      if (err) {
+        setError('Не удалось отправить вопрос. Проверь соединение и попробуй снова.');
+        return;
+      }
       if (res.ok) {
         setSession(res.sessionId, res.state);
         updateSession(res.state);

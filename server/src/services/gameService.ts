@@ -118,7 +118,10 @@ export class GameService {
     const maleCount = state.males.length;
     const femaleCount = state.females.length;
 
-    if (maleCount >= config.MAX_PLAYERS_PER_GENDER && femaleCount >= config.MAX_PLAYERS_PER_GENDER) {
+    const reachedMax = maleCount >= config.MAX_PLAYERS_PER_GENDER && femaleCount >= config.MAX_PLAYERS_PER_GENDER;
+    const reachedMin = maleCount >= config.MIN_PLAYERS_PER_GENDER && femaleCount >= config.MIN_PLAYERS_PER_GENDER;
+
+    if (reachedMax || (config.AUTO_START_ON_MIN_PLAYERS && reachedMin)) {
       await this.startSession(sessionId);
     }
 

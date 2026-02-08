@@ -9,6 +9,7 @@ const envSchema = z.object({
   LOBBY_TIMEOUT_SEC: z.coerce.number().default(90),
   MIN_PLAYERS_PER_GENDER: z.coerce.number().default(1),
   MAX_PLAYERS_PER_GENDER: z.coerce.number().default(3),
+  AUTO_START_ON_MIN_PLAYERS: z.coerce.boolean().default(true),
   ANSWER_TIMEOUT_SEC: z.coerce.number().default(60),
   VOTE_TIMEOUT_SEC: z.coerce.number().default(30),
 });
