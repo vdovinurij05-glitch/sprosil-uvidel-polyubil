@@ -78,25 +78,29 @@ export class GameService {
     }
 
     // Find or create lobby session
-    let session = await this.findOpenLobby(user.gender);
-    if (!session) {
-      session = await prisma.session.create({ data: {} });
-      logger.info('New lobby created', { sessionId: session.id });
-      this.startLobbyTimer(session.id);
+    let sessionId: string;
+    const existingLobby = await this.findOpenLobby(user.gender as Gender);
+    if (existingLobby) {
+      sessionId = existingLobby.id;
+    } else {
+      const created = await prisma.session.create({ data: {} });
+      sessionId = created.id;
+      logger.info('New lobby created', { sessionId });
+      this.startLobbyTimer(sessionId);
     }
 
     // Join session
     await prisma.sessionParticipant.create({
-      data: { sessionId: session.id, userId },
+      data: { sessionId, userId },
     });
 
     // Save question
-    const participants = await this.getSessionParticipants(session.id);
-    const round = participants.filter(p => p.gender === user.gender).length;
+    const participants = await this.getSessionParticipants(sessionId);
+    const round = participants.filter((p: SessionPlayer) => p.gender === user.gender).length;
 
     await prisma.question.create({
       data: {
-        sessionId: session.id,
+        sessionId,
         authorId: userId,
         text: sanitized,
         round,
@@ -104,22 +108,22 @@ export class GameService {
     });
 
     logger.info('Player joined lobby', {
-      sessionId: session.id,
+      sessionId,
       userId,
       gender: user.gender,
     });
 
     // Check if session can start
-    const state = await this.getSessionState(session.id);
+    const state = await this.getSessionState(sessionId);
     const maleCount = state.males.length;
     const femaleCount = state.females.length;
 
     if (maleCount >= config.MAX_PLAYERS_PER_GENDER && femaleCount >= config.MAX_PLAYERS_PER_GENDER) {
-      await this.startSession(session.id);
+      await this.startSession(sessionId);
     }
 
-    const finalState = await this.getSessionState(session.id);
-    return { sessionId: session.id, state: finalState };
+    const finalState = await this.getSessionState(sessionId);
+    return { sessionId, state: finalState };
   }
 
   private async findOpenLobby(gender: Gender) {
@@ -328,7 +332,7 @@ export class GameService {
     const author = await prisma.user.findUnique({ where: { id: question.authorId } });
     if (!author) return false;
 
-    const voters = await this.getParticipantsByGender(sessionId, author.gender!);
+    const voters = await this.getParticipantsByGender(sessionId, author.gender as Gender);
     const votes = await prisma.vote.findMany({ where: { questionId: question.id } });
 
     return votes.length >= voters.length;

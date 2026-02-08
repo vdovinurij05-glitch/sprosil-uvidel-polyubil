@@ -9,7 +9,7 @@ router.use(authMiddleware);
 // Get session state
 router.get('/:sessionId', async (req: Request, res: Response) => {
   try {
-    const state = await gameService.getSessionState(req.params.sessionId);
+    const state = await gameService.getSessionState(req.params.sessionId as string);
     res.json(state);
   } catch (error: any) {
     res.status(404).json({ error: error.message });
@@ -19,7 +19,7 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
 // Get match results
 router.get('/:sessionId/matches', async (req: Request, res: Response) => {
   try {
-    const matches = await gameService.getMatchResults(req.params.sessionId);
+    const matches = await gameService.getMatchResults(req.params.sessionId as string);
     res.json(matches);
   } catch (error: any) {
     res.status(404).json({ error: error.message });
