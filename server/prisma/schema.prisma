@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  telegramId  BigInt   @unique @map("telegram_id")
+  username    String?
+  firstName   String   @map("first_name")
+  photoUrl    String?  @map("photo_url")
+  gender      String?  // "male" | "female"
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  participations SessionParticipant[]
+  questions      Question[]
+  answers        Answer[]
+  votesGiven     Vote[]    @relation("voter")
+  votesReceived  Vote[]    @relation("votedFor")
+  matchesAsA     Match[]   @relation("matchUserA")
+  matchesAsB     Match[]   @relation("matchUserB")
+  reports        Report[]  @relation("reporter")
+  reportedIn     Report[]  @relation("reported")
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  status       String   @default("lobby") // lobby | roster | qa_rounds | voting | results | closed
+  currentRound Int      @default(0) @map("current_round")
+  totalRounds  Int      @default(0) @map("total_rounds")
+  lobbyStartAt DateTime @default(now()) @map("lobby_start_at")
+  startedAt    DateTime? @map("started_at")
+  endedAt      DateTime? @map("ended_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  participants SessionParticipant[]
+  questions    Question[]
+  matches      Match[]
+
+  @@map("sessions")
+}
+
+model SessionParticipant {
+  id        String   @id @default(cuid())
+  sessionId String   @map("session_id")
+  userId    String   @map("user_id")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@index([sessionId])
+  @@index([userId])
+  @@map("session_participants")
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  sessionId String   @map("session_id")
+  authorId  String   @map("author_id")
+  text      String
+  round     Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  author  User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  answers Answer[]
+  votes   Vote[]
+
+  @@unique([sessionId, authorId])
+  @@index([sessionId])
+  @@map("questions")
+}
+
+model Answer {
+  id         String   @id @default(cuid())
+  questionId String   @map("question_id")
+  authorId   String   @map("author_id")
+  text       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  votes    Vote[]
+
+  @@unique([questionId, authorId])
+  @@index([questionId])
+  @@map("answers")
+}
+
+model Vote {
+  id         String   @id @default(cuid())
+  questionId String   @map("question_id")
+  voterId    String   @map("voter_id")
+  votedForId String   @map("voted_for_id")
+  answerId   String?  @map("answer_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  voter    User     @relation("voter", fields: [voterId], references: [id], onDelete: Cascade)
+  votedFor User     @relation("votedFor", fields: [votedForId], references: [id], onDelete: Cascade)
+  answer   Answer?  @relation(fields: [answerId], references: [id], onDelete: SetNull)
+
+  @@unique([questionId, voterId])
+  @@index([questionId])
+  @@index([voterId])
+  @@index([votedForId])
+  @@map("votes")
+}
+
+model Match {
+  id        String   @id @default(cuid())
+  sessionId String   @map("session_id")
+  userAId   String   @map("user_a_id")
+  userBId   String   @map("user_b_id")
+  score     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userA   User    @relation("matchUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB   User    @relation("matchUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userAId, userBId])
+  @@index([sessionId])
+  @@map("matches")
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  reporterId String   @map("reporter_id")
+  reportedId String   @map("reported_id")
+  reason     String
+  contentRef String?  @map("content_ref")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  reporter User @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("reported", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@index([reporterId])
+  @@index([reportedId])
+  @@map("reports")
+}
