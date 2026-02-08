@@ -20,6 +20,7 @@ async function main() {
   const app = express();
   const server = http.createServer(app);
 
+  app.set('trust proxy', 1);
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
