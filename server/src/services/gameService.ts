@@ -33,6 +33,18 @@ export interface SessionState {
     authorId: string;
     text: string;
   }[];
+  // Used for final voting phase: show all Q&A for the whole session.
+  questions?: {
+    id: string;
+    text: string;
+    authorId: string;
+    round: number;
+  }[];
+  allAnswers?: {
+    questionId: string;
+    authorId: string;
+    text: string;
+  }[];
   timeRemaining?: number;
 }
 
@@ -295,7 +307,8 @@ export class GameService {
   private async startVotingPhase(sessionId: string) {
     await prisma.session.update({
       where: { id: sessionId },
-      data: { status: 'voting', currentRound: 1 },
+      // Final voting is a single phase, not per-question rounds.
+      data: { status: 'voting', currentRound: 0 },
     });
 
     logger.info('Session → voting', { sessionId });
@@ -303,64 +316,39 @@ export class GameService {
     this.onSessionUpdate?.(sessionId, state);
   }
 
-  async submitVote(sessionId: string, voterId: string, questionId: string, votedForId: string): Promise<void> {
+  async submitVote(sessionId: string, voterId: string, _questionId: string | null, votedForId: string | null): Promise<void> {
     const session = await prisma.session.findUnique({ where: { id: sessionId } });
     if (!session || session.status !== 'voting') {
       throw new Error('Session is not in voting phase');
     }
 
-    const question = await prisma.question.findUnique({ where: { id: questionId } });
-    if (!question || question.sessionId !== sessionId || question.round !== session.currentRound) {
-      throw new Error('Invalid question for current round');
+    const voter = await prisma.user.findUnique({ where: { id: voterId } });
+    if (!voter) throw new Error('User not found');
+
+    if (votedForId) {
+      const votedFor = await prisma.user.findUnique({ where: { id: votedForId } });
+      if (!votedFor) throw new Error('User not found');
+      if (voter.gender === votedFor.gender) throw new Error('Must vote for opposite gender');
     }
 
-    // Validate voter and votedFor are opposite genders
-    const [voter, votedFor] = await Promise.all([
-      prisma.user.findUnique({ where: { id: voterId } }),
-      prisma.user.findUnique({ where: { id: votedForId } }),
-    ]);
-    if (!voter || !votedFor) throw new Error('User not found');
-    if (voter.gender === votedFor.gender) throw new Error('Must vote for opposite gender');
-
-    // Find the answer by votedFor for this question
-    const answer = await prisma.answer.findUnique({
-      where: { questionId_authorId: { questionId, authorId: votedForId } },
+    await prisma.finalVote.upsert({
+      where: { sessionId_voterId: { sessionId, voterId } },
+      update: { votedForId },
+      create: { sessionId, voterId, votedForId },
     });
 
-    await prisma.vote.upsert({
-      where: { questionId_voterId: { questionId, voterId } },
-      update: { votedForId, answerId: answer?.id || null },
-      create: { questionId, voterId, votedForId, answerId: answer?.id || null },
-    });
+    logger.info('Final vote submitted', { sessionId, voterId, votedForId });
 
-    logger.info('Vote submitted', { sessionId, voterId, votedForId, questionId });
-
-    // Check if all votes received for this question
-    const allVotes = await this.checkAllVotesReceived(sessionId, question);
-    if (allVotes) {
-      if (session.currentRound >= session.totalRounds) {
-        await this.calculateMatches(sessionId);
-      } else {
-        await prisma.session.update({
-          where: { id: sessionId },
-          data: { currentRound: session.currentRound + 1, status: 'voting' },
-        });
-        logger.info('Voting next round', { sessionId, round: session.currentRound + 1 });
-        const state = await this.getSessionState(sessionId);
-        this.onSessionUpdate?.(sessionId, state);
-      }
+    const allFinalVotes = await this.checkAllFinalVotesReceived(sessionId);
+    if (allFinalVotes) {
+      await this.calculateMatches(sessionId);
     }
   }
 
-  private async checkAllVotesReceived(sessionId: string, question: { id: string; authorId: string }): Promise<boolean> {
-    // Voters are the SAME gender as the question author (they choose best answer from opposite gender)
-    const author = await prisma.user.findUnique({ where: { id: question.authorId } });
-    if (!author) return false;
-
-    const voters = await this.getParticipantsByGender(sessionId, author.gender as Gender);
-    const votes = await prisma.vote.findMany({ where: { questionId: question.id } });
-
-    return votes.length >= voters.length;
+  private async checkAllFinalVotesReceived(sessionId: string): Promise<boolean> {
+    const participants = await prisma.sessionParticipant.count({ where: { sessionId } });
+    const votes = await prisma.finalVote.count({ where: { sessionId } });
+    return votes >= participants;
   }
 
   async forceAdvanceRound(sessionId: string) {
@@ -381,17 +369,16 @@ export class GameService {
         await this.startVotingPhase(sessionId);
       }
     } else if (session.status === 'voting') {
-      if (session.currentRound >= session.totalRounds) {
-        await this.calculateMatches(sessionId);
-      } else {
-        await prisma.session.update({
-          where: { id: sessionId },
-          data: { currentRound: session.currentRound + 1, status: 'voting' },
+      // Final voting timeout: treat missing voters as "no one" and close results.
+      const participants = await prisma.sessionParticipant.findMany({ where: { sessionId } });
+      for (const p of participants) {
+        await prisma.finalVote.upsert({
+          where: { sessionId_voterId: { sessionId, voterId: p.userId } },
+          update: {},
+          create: { sessionId, voterId: p.userId, votedForId: null },
         });
-        logger.info('Voting timeout next round', { sessionId, round: session.currentRound + 1 });
-        const state = await this.getSessionState(sessionId);
-        this.onSessionUpdate?.(sessionId, state);
       }
+      await this.calculateMatches(sessionId);
     }
   }
 
@@ -400,69 +387,22 @@ export class GameService {
     const males = participants.filter(p => p.gender === 'male');
     const females = participants.filter(p => p.gender === 'female');
 
-    // Get all votes in this session
-    const questions = await prisma.question.findMany({ where: { sessionId } });
-    const questionIds = questions.map(q => q.id);
-    const allVotes = await prisma.vote.findMany({
-      where: { questionId: { in: questionIds } },
-    });
+    // Final voting: mutual choice in one round.
+    const finalVotes = await prisma.finalVote.findMany({ where: { sessionId } });
+    const byVoter = new Map<string, string | null>();
+    for (const v of finalVotes) byVoter.set(v.voterId, v.votedForId);
 
-    // For each male, count how many times they voted for each female
-    const malePreferences = new Map<string, Map<string, number>>();
-    // For each female, count how many times they voted for each male
-    const femalePreferences = new Map<string, Map<string, number>>();
-
-    for (const vote of allVotes) {
-      const voter = participants.find(p => p.userId === vote.voterId);
-      if (!voter) continue;
-
-      const prefMap = voter.gender === 'male' ? malePreferences : femalePreferences;
-      if (!prefMap.has(vote.voterId)) {
-        prefMap.set(vote.voterId, new Map());
-      }
-      const counts = prefMap.get(vote.voterId)!;
-      counts.set(vote.votedForId, (counts.get(vote.votedForId) || 0) + 1);
-    }
-
-    // Find mutual matches
     const matches: { userAId: string; userBId: string; score: number }[] = [];
+    for (const [voterId, votedForId] of byVoter) {
+      if (!votedForId) continue;
+      const back = byVoter.get(votedForId);
+      if (back !== voterId) continue;
 
-    for (const male of males) {
-      const malePref = malePreferences.get(male.userId);
-      if (!malePref) continue;
-
-      // Find male's top choice
-      let maleTopChoice: string | null = null;
-      let maleTopScore = 0;
-      for (const [femaleId, count] of malePref) {
-        if (count > maleTopScore) {
-          maleTopScore = count;
-          maleTopChoice = femaleId;
-        }
-      }
-
-      if (!maleTopChoice) continue;
-
-      // Check if that female also chose this male as top
-      const femalePref = femalePreferences.get(maleTopChoice);
-      if (!femalePref) continue;
-
-      let femaleTopChoice: string | null = null;
-      let femaleTopScore = 0;
-      for (const [maleId, count] of femalePref) {
-        if (count > femaleTopScore) {
-          femaleTopScore = count;
-          femaleTopChoice = maleId;
-        }
-      }
-
-      if (femaleTopChoice === male.userId) {
-        matches.push({
-          userAId: male.userId,
-          userBId: maleTopChoice,
-          score: maleTopScore + femaleTopScore,
-        });
-      }
+      const a = voterId < votedForId ? voterId : votedForId;
+      const b = voterId < votedForId ? votedForId : voterId;
+      // avoid duplicates
+      if (matches.find(m => m.userAId === a && m.userBId === b)) continue;
+      matches.push({ userAId: a, userBId: b, score: 1 });
     }
 
     // Save matches
@@ -505,7 +445,7 @@ export class GameService {
       females,
     };
 
-    if ((session.status === 'qa_rounds' || session.status === 'voting') && session.currentRound > 0) {
+    if (session.status === 'qa_rounds' && session.currentRound > 0) {
       const question = await prisma.question.findFirst({
         where: { sessionId, round: session.currentRound },
       });
@@ -516,15 +456,21 @@ export class GameService {
           authorId: question.authorId,
           round: question.round,
         };
-
-        if (session.status === 'voting') {
-          const answers = await prisma.answer.findMany({
-            where: { questionId: question.id },
-            select: { id: true, authorId: true, text: true },
-          });
-          state.answers = answers;
-        }
       }
+    }
+
+    if (session.status === 'voting') {
+      const questions = await prisma.question.findMany({
+        where: { sessionId },
+        select: { id: true, text: true, authorId: true, round: true },
+        orderBy: { round: 'asc' },
+      });
+      const answers = await prisma.answer.findMany({
+        where: { question: { sessionId } },
+        select: { questionId: true, authorId: true, text: true },
+      });
+      state.questions = questions;
+      state.allAnswers = answers;
     }
 
     return state;

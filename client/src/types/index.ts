@@ -23,6 +23,19 @@ export interface AnswerItem {
   text: string;
 }
 
+export interface QuestionItem {
+  id: string;
+  text: string;
+  authorId: string;
+  round: number;
+}
+
+export interface FlatAnswerItem {
+  questionId: string;
+  authorId: string;
+  text: string;
+}
+
 export interface SessionState {
   id: string;
   status: SessionStatus;
@@ -32,6 +45,8 @@ export interface SessionState {
   females: Player[];
   currentQuestion?: CurrentQuestion;
   answers?: AnswerItem[];
+  questions?: QuestionItem[];
+  allAnswers?: FlatAnswerItem[];
   timeRemaining?: number;
 }
 

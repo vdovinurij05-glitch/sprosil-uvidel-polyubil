@@ -1,106 +1,139 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { getSocket } from '../utils/socket';
 import { Timer } from '../components/Timer';
 import { Avatar } from '../components/Avatar';
+import type { FlatAnswerItem, QuestionItem } from '../types';
 
 interface VotingScreenProps {
   initData: string;
 }
 
+type ChoiceId = string | '__none__';
+
 export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
   const sessionState = useGameStore((s) => s.sessionState);
   const user = useGameStore((s) => s.user);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<ChoiceId | null>(null);
   const [voted, setVoted] = useState(false);
 
-  if (!sessionState || !sessionState.currentQuestion || !user) return null;
+  if (!sessionState || !user) return null;
 
-  const question = sessionState.currentQuestion;
-  const answers = sessionState.answers || [];
+  const allPlayers = useMemo(() => [...sessionState.males, ...sessionState.females], [sessionState.males, sessionState.females]);
+  const questions: QuestionItem[] = sessionState.questions || [];
+  const allAnswers: FlatAnswerItem[] = sessionState.allAnswers || [];
 
-  // Find author
-  const allPlayers = [...sessionState.males, ...sessionState.females];
-  const author = allPlayers.find((p) => p.userId === question.authorId);
+  const candidates = user.gender === 'male' ? sessionState.females : sessionState.males;
 
-  // Voter must be same gender as question author (they judge opposite gender answers)
-  const canVote = user.gender === author?.gender;
+  const myQuestions = useMemo(() => {
+    return questions.filter((q) => {
+      const author = allPlayers.find((p) => p.userId === q.authorId);
+      return author?.gender === user.gender;
+    });
+  }, [questions, allPlayers, user.gender]);
 
-  // Reset local selection state when the question changes (new voting round).
   useEffect(() => {
     setSelectedId(null);
     setVoted(false);
-  }, [question.id]);
+  }, [sessionState.id, sessionState.status]);
+
+  const getCandidateQA = (candidateId: string) => {
+    return myQuestions.map((q) => {
+      const a = allAnswers.find((x) => x.questionId === q.id && x.authorId === candidateId);
+      return { q, a: a?.text || null };
+    });
+  };
 
   const handleVote = () => {
-    if (!selectedId) return;
+    if (selectedId === null) return;
 
     const socket = getSocket(initData);
     socket.emit(
       'vote:submit',
       {
         sessionId: sessionState.id,
-        questionId: question.id,
-        votedForId: selectedId,
+        votedForId: selectedId === '__none__' ? null : selectedId,
       },
       (res: any) => {
-        if (res.ok) {
-          setVoted(true);
-        } else {
-          alert(res.error);
-        }
+        if (res.ok) setVoted(true);
+        else alert(res.error);
       },
     );
   };
 
+  // Voting screen expects server to provide questions+allAnswers. If not present, show a safe fallback message.
+  if (questions.length === 0) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.roundBadge}>Выбор</div>
+        <Timer />
+        <div style={styles.waitingMessage}>Готовим данные для выбора...</div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
-      <div style={styles.roundBadge}>
-        Голосование: раунд {sessionState.currentRound}/{sessionState.totalRounds}
-      </div>
+      <div style={styles.roundBadge}>Выбор: один человек или "никого"</div>
 
       <Timer />
 
-      <div style={styles.questionCard}>
-        <p style={styles.questionLabel}>Вопрос:</p>
-        <p style={styles.questionText}>{question.text}</p>
-      </div>
-
-      {canVote && !voted && (
+      {!voted && (
         <>
-          <p style={styles.instruction}>Выбери лучший ответ:</p>
+          <p style={styles.instruction}>Посмотри ответы и выбери одного:</p>
+
           <div style={styles.answersList}>
-            {answers.map((a) => {
-              const player = allPlayers.find((p) => p.userId === a.authorId);
-              if (!player) return null;
+            {candidates.map((player) => {
+              const qa = getCandidateQA(player.userId);
 
               return (
                 <div
-                  key={a.id}
-                  onClick={() => setSelectedId(a.authorId)}
+                  key={player.userId}
+                  onClick={() => setSelectedId(player.userId)}
                   style={{
                     ...styles.answerCard,
-                    borderColor: selectedId === a.authorId ? '#FF6B6B' : '#e0e0e0',
-                    backgroundColor: selectedId === a.authorId ? 'rgba(255,107,107,0.05)' : '#fff',
+                    borderColor: selectedId === player.userId ? '#FF6B6B' : '#e0e0e0',
+                    backgroundColor: selectedId === player.userId ? 'rgba(255,107,107,0.05)' : '#fff',
                   }}
                 >
                   <div style={styles.answerHeader}>
                     <Avatar photoUrl={player.photoUrl} firstName={player.firstName} size={32} />
                     <span style={{ fontWeight: 600, fontSize: 14 }}>{player.firstName}</span>
-                    {selectedId === a.authorId && <span style={styles.selectedBadge}>♥</span>}
+                    {selectedId === player.userId && <span style={styles.selectedBadge}>♥</span>}
                   </div>
-                  <p style={styles.answerText}>{a.text}</p>
+
+                  {qa.map(({ q, a }) => (
+                    <div key={q.id} style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>{q.text}</div>
+                      <div style={{ fontSize: 14, color: '#333', lineHeight: 1.35 }}>{a ?? '—'}</div>
+                    </div>
+                  ))}
                 </div>
               );
             })}
+
+            <div
+              onClick={() => setSelectedId('__none__')}
+              style={{
+                ...styles.answerCard,
+                borderColor: selectedId === '__none__' ? '#FF6B6B' : '#e0e0e0',
+                backgroundColor: selectedId === '__none__' ? 'rgba(255,107,107,0.05)' : '#fff',
+              }}
+            >
+              <div style={styles.answerHeader}>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>Никого</span>
+                {selectedId === '__none__' && <span style={styles.selectedBadge}>♥</span>}
+              </div>
+              <p style={styles.answerText}>Пропустить выбор</p>
+            </div>
           </div>
 
           <button
             onClick={handleVote}
-            disabled={!selectedId}
+            disabled={selectedId === null}
             style={{
               ...styles.button,
-              opacity: !selectedId ? 0.5 : 1,
+              opacity: selectedId === null ? 0.5 : 1,
             }}
           >
             Выбрать
@@ -108,17 +141,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
         </>
       )}
 
-      {canVote && voted && (
-        <div style={styles.waitingMessage}>
-          Голос принят! Ждём остальных...
-        </div>
-      )}
-
-      {!canVote && (
-        <div style={styles.waitingMessage}>
-          Твои ответы оценивают... Ждём результат!
-        </div>
-      )}
+      {voted && <div style={styles.waitingMessage}>Выбор принят! Ждём остальных...</div>}
     </div>
   );
 };
@@ -141,29 +164,11 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#FF6B6B',
     marginTop: 16,
   },
-  questionCard: {
-    width: '100%',
-    maxWidth: 360,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: '#f8f8f8',
-  },
-  questionLabel: {
-    margin: 0,
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 4,
-  },
-  questionText: {
-    margin: 0,
-    fontSize: 16,
-    fontWeight: 600,
-    color: '#1a1a1a',
-  },
   instruction: {
     fontSize: 15,
     fontWeight: 600,
     color: '#444',
+    textAlign: 'center',
   },
   answersList: {
     width: '100%',
@@ -178,6 +183,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '2px solid #e0e0e0',
     cursor: 'pointer',
     transition: 'all 0.2s',
+    backgroundColor: '#fff',
   },
   answerHeader: {
     display: 'flex',
@@ -216,5 +222,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     fontWeight: 500,
     marginTop: 20,
+    textAlign: 'center',
   },
 };
+

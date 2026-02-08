@@ -135,9 +135,11 @@ export function setupSocketHandlers(io: Server) {
     });
 
     // Submit vote
-    socket.on('vote:submit', async (data: { sessionId: string; questionId: string; votedForId: string }, callback) => {
+    socket.on(
+      'vote:submit',
+      async (data: { sessionId: string; questionId?: string | null; votedForId: string | null }, callback) => {
       try {
-        await gameService.submitVote(data.sessionId, userId, data.questionId, data.votedForId);
+        await gameService.submitVote(data.sessionId, userId, data.questionId ?? null, data.votedForId);
         callback({ ok: true });
 
         const state = await gameService.getSessionState(data.sessionId);
@@ -146,7 +148,8 @@ export function setupSocketHandlers(io: Server) {
         logger.error('vote:submit error', { userId, error: error.message });
         callback({ ok: false, error: error.message });
       }
-    });
+      },
+    );
 
     // Get match results
     socket.on('matches:get', async (data: { sessionId: string }, callback) => {
