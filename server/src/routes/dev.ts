@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../utils/db';
 import { gameService } from '../services/gameService';
 import { logger } from '../utils/logger';
+import { config } from '../config';
 
 const router = Router();
 
@@ -53,8 +54,8 @@ router.post('/fill-lobby', async (req: Request, res: Response) => {
 
     const existingMales = session.participants.filter(p => p.user.gender === 'male').length;
     const existingFemales = session.participants.filter(p => p.user.gender === 'female').length;
-    const neededMales = 3 - existingMales;
-    const neededFemales = 3 - existingFemales;
+    const neededMales = config.MAX_PLAYERS_PER_GENDER - existingMales;
+    const neededFemales = config.MAX_PLAYERS_PER_GENDER - existingFemales;
 
     const botNames = {
       male: ['Алексей', 'Дмитрий', 'Иван', 'Сергей', 'Антон'],

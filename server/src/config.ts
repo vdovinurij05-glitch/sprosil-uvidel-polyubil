@@ -7,7 +7,7 @@ const envSchema = z.object({
   WEBAPP_URL: z.string().url().default('http://localhost:5173'),
   DATABASE_URL: z.string().min(1),
   LOBBY_TIMEOUT_SEC: z.coerce.number().default(90),
-  MIN_PLAYERS_PER_GENDER: z.coerce.number().default(2),
+  MIN_PLAYERS_PER_GENDER: z.coerce.number().default(1),
   MAX_PLAYERS_PER_GENDER: z.coerce.number().default(3),
   ANSWER_TIMEOUT_SEC: z.coerce.number().default(60),
   VOTE_TIMEOUT_SEC: z.coerce.number().default(30),
