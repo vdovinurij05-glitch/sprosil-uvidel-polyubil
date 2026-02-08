@@ -1,6 +1,7 @@
 import { Telegraf } from 'telegraf';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import type { Express } from 'express';
 
 export function createBot(): Telegraf {
   const bot = new Telegraf(config.BOT_TOKEN);
@@ -44,4 +45,17 @@ export function createBot(): Telegraf {
   });
 
   return bot;
+}
+
+export async function setupBotWebhook(bot: Telegraf, app: Express) {
+  const webhookPath = `/bot${config.BOT_TOKEN}`;
+  const webhookUrl = `${config.WEBAPP_URL}${webhookPath}`;
+
+  // Set webhook handler as Express route
+  app.use(webhookPath, (req, res) => bot.handleUpdate(req.body, res));
+
+  // Tell Telegram to use webhook
+  await bot.telegram.setWebhook(webhookUrl, { drop_pending_updates: true });
+
+  logger.info('Telegram bot webhook set', { url: webhookUrl });
 }

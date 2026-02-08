@@ -9,7 +9,7 @@ import { logger } from './utils/logger';
 import { prisma } from './utils/db';
 import { apiLimiter } from './middleware/rateLimit';
 import { setupSocketHandlers } from './socket/handler';
-import { createBot } from './bot';
+import { createBot, setupBotWebhook } from './bot';
 import userRoutes from './routes/user';
 import sessionRoutes from './routes/session';
 import reportRoutes from './routes/report';
@@ -53,19 +53,13 @@ async function main() {
 
   setupSocketHandlers(io);
 
-  // Telegram Bot
+  // Telegram Bot (webhook mode)
   const bot = createBot();
-  logger.info('Starting Telegram bot...');
-  bot.launch({ dropPendingUpdates: true }).then(() => {
-    logger.info('Telegram bot started successfully');
-  }).catch((err) => {
-    logger.error('Telegram bot FAILED', { error: String(err) });
-  });
+  await setupBotWebhook(bot, app);
 
   // Graceful shutdown
   const shutdown = async () => {
     logger.info('Shutting down...');
-    bot.stop('SIGTERM');
     io.close();
     await prisma.$disconnect();
     process.exit(0);
