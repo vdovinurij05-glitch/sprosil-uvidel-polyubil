@@ -21,7 +21,7 @@ async function main() {
   const server = http.createServer(app);
 
   app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(cors({ origin: config.WEBAPP_URL, credentials: true }));
+  app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
   app.use(apiLimiter);
 
@@ -57,6 +57,8 @@ async function main() {
   const bot = createBot();
   bot.launch().then(() => {
     logger.info('Telegram bot started');
+  }).catch((err) => {
+    logger.error('Telegram bot failed to start', { error: err.message || err });
   });
 
   // Graceful shutdown
