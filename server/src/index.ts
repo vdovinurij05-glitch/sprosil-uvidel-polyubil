@@ -55,10 +55,11 @@ async function main() {
 
   // Telegram Bot
   const bot = createBot();
-  bot.launch().then(() => {
-    logger.info('Telegram bot started');
+  logger.info('Starting Telegram bot...');
+  bot.launch({ dropPendingUpdates: true }).then(() => {
+    logger.info('Telegram bot started successfully');
   }).catch((err) => {
-    logger.error('Telegram bot failed to start', { error: err.message || err });
+    logger.error('Telegram bot FAILED', { error: String(err) });
   });
 
   // Graceful shutdown
