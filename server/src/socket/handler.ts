@@ -12,6 +12,8 @@ const sessionUsers = new Map<string, Set<string>>();
 
 // Round timers (timeout + interval) to avoid multiple overlapping tickers.
 const roundTimers = new Map<string, { timeout: NodeJS.Timeout; interval: NodeJS.Timeout }>();
+// Track which phase/round currently owns the timer per session so we don't restart it on every session:update.
+const activeTimerKey = new Map<string, string>(); // sessionId -> `${status}:${currentRound}`
 
 export function setupSocketHandlers(io: Server) {
   // Set up game service callbacks
@@ -19,11 +21,22 @@ export function setupSocketHandlers(io: Server) {
     onSessionUpdate: (sessionId: string, state: SessionState) => {
       io.to(`session:${sessionId}`).emit('session:update', state);
 
-      // Set up timeouts for qa_rounds and voting
-      if (state.status === 'qa_rounds') {
-        setRoundTimer(io, sessionId, config.ANSWER_TIMEOUT_SEC, 'answer');
-      } else if (state.status === 'voting') {
-        setRoundTimer(io, sessionId, config.VOTE_TIMEOUT_SEC, 'vote');
+      // Set up timeouts for qa_rounds and voting.
+      // Important: do NOT restart timers on every session:update; only when phase/round changes.
+      if (state.status === 'qa_rounds' || state.status === 'voting') {
+        const desiredKey = `${state.status}:${state.currentRound}`;
+        if (activeTimerKey.get(sessionId) !== desiredKey) {
+          clearSessionRoundTimers(sessionId);
+          if (state.status === 'qa_rounds') {
+            setRoundTimer(io, sessionId, config.ANSWER_TIMEOUT_SEC, 'answer');
+          } else {
+            setRoundTimer(io, sessionId, config.VOTE_TIMEOUT_SEC, 'vote');
+          }
+          activeTimerKey.set(sessionId, desiredKey);
+        }
+      } else {
+        clearSessionRoundTimers(sessionId);
+        activeTimerKey.delete(sessionId);
       }
     },
     onLobbyTimeout: (sessionId: string) => {
@@ -161,6 +174,18 @@ export function setupSocketHandlers(io: Server) {
       logger.info('Socket disconnected', { userId });
     });
   });
+}
+
+function clearSessionRoundTimers(sessionId: string) {
+  for (const phase of ['answer', 'vote'] as const) {
+    const key = `${sessionId}:${phase}`;
+    const existing = roundTimers.get(key);
+    if (existing) {
+      clearTimeout(existing.timeout);
+      clearInterval(existing.interval);
+      roundTimers.delete(key);
+    }
+  }
 }
 
 function setRoundTimer(io: Server, sessionId: string, seconds: number, phase: 'answer' | 'vote') {
