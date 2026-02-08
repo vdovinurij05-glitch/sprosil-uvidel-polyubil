@@ -47,9 +47,18 @@ router.post('/gender', submitLimiter, async (req: Request, res: Response) => {
     return;
   }
 
-  if (user.gender) {
-    res.status(400).json({ error: 'Gender already set' });
-    return;
+  // Check not in active session before allowing gender change
+  if (user.gender && user.gender !== parsed.data.gender) {
+    const activeSession = await prisma.sessionParticipant.findFirst({
+      where: {
+        userId: user.id,
+        session: { status: { in: ['lobby', 'roster', 'qa_rounds', 'voting'] } },
+      },
+    });
+    if (activeSession) {
+      res.status(400).json({ error: 'Cannot change gender during active game' });
+      return;
+    }
   }
 
   const updated = await prisma.user.update({

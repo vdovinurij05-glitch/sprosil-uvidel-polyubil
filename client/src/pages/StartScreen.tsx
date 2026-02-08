@@ -9,7 +9,7 @@ interface StartScreenProps {
 export const StartScreen: React.FC<StartScreenProps> = ({ initData }) => {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
-  const { setSession, updateSession, setError } = useGameStore();
+  const { user, setSession, updateSession, setError, setScreen } = useGameStore();
 
   const handleSubmit = () => {
     if (!question.trim() || question.trim().length < 3) {
@@ -64,6 +64,13 @@ export const StartScreen: React.FC<StartScreenProps> = ({ initData }) => {
       {useGameStore.getState().error && (
         <p style={styles.error}>{useGameStore.getState().error}</p>
       )}
+
+      <button
+        onClick={() => setScreen('gender')}
+        style={styles.changeGender}
+      >
+        {user?.gender === 'male' ? '👨' : '👩'} Сменить пол
+      </button>
     </div>
   );
 };
@@ -135,5 +142,14 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#FF4444',
     fontSize: 14,
     textAlign: 'center',
+  },
+  changeGender: {
+    background: 'none',
+    border: 'none',
+    color: '#999',
+    fontSize: 13,
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    padding: '8px 16px',
   },
 };
