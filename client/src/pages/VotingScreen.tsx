@@ -31,6 +31,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const nodeRefByUserId = useRef<Record<string, HTMLDivElement | null>>({});
   const seenVotesRef = useRef<Map<string, string | null>>(new Map());
+  const initialAnimateRef = useRef(true);
   const [layoutTick, setLayoutTick] = useState(0);
   const [arrows, setArrows] = useState<VoteArrow[]>([]);
 
@@ -103,6 +104,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
     if (!boardEl) return;
 
     const boardRect = boardEl.getBoundingClientRect();
+    const isInitial = initialAnimateRef.current;
 
     const nextArrows: VoteArrow[] = [];
 
@@ -126,7 +128,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
       };
 
       const prev = seenVotesRef.current.get(v.voterId);
-      const animated = prev === undefined && v.votedForId !== null;
+      const animated = isInitial || (prev === undefined && v.votedForId !== null);
 
       nextArrows.push({
         key: `${v.voterId}->${v.votedForId}`,
@@ -141,6 +143,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
     }
 
     setArrows(nextArrows);
+    initialAnimateRef.current = false;
   }, [finalVotes, layoutTick]);
 
   const totalVoters = sessionState.males.length + sessionState.females.length;
@@ -341,10 +344,15 @@ const css = `
 .votePath--animated {
   stroke-dasharray: 1000;
   stroke-dashoffset: 1000;
-  animation: vote-draw 720ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  animation: vote-draw 720ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards, vote-glow 720ms ease-out forwards;
 }
 @keyframes vote-draw {
   to { stroke-dashoffset: 0; }
+}
+@keyframes vote-glow {
+  0% { opacity: 0.0; }
+  30% { opacity: 1.0; }
+  100% { opacity: 0.92; }
 }
 `;
 
@@ -385,7 +393,7 @@ const styles: Record<string, React.CSSProperties> = {
   arrowSvg: {
     position: "absolute",
     inset: 0,
-    zIndex: 0,
+    zIndex: 4,
     pointerEvents: "none",
   },
   boardRowTitleWrap: {
