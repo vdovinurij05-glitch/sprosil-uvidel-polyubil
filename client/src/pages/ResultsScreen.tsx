@@ -53,6 +53,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ initData }) => {
 
   useLayoutEffect(() => {
     if (!sessionState) return;
+    if (loading) return;
     const boardEl = boardRef.current;
     if (!boardEl) return;
 
@@ -80,7 +81,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ initData }) => {
 
     setArrows(next);
     initialAnimateRef.current = false;
-  }, [finalVotes, sessionState, layoutTick]);
+  }, [finalVotes, sessionState, layoutTick, loading]);
 
   if (!sessionState) return null;
 
@@ -483,4 +484,3 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 6,
   },
 };
-
