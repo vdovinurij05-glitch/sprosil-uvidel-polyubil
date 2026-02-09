@@ -45,6 +45,10 @@ export interface SessionState {
     authorId: string;
     text: string;
   }[];
+  finalVotes?: {
+    voterId: string;
+    votedForId: string | null;
+  }[];
   timeRemaining?: number;
 }
 
@@ -231,7 +235,8 @@ export class GameService {
   async advanceToQaRounds(sessionId: string) {
     await prisma.session.update({
       where: { id: sessionId },
-      data: { status: 'qa_rounds', currentRound: 1 },
+      // QA phase: answer ALL questions in parallel.
+      data: { status: 'qa_rounds', currentRound: 0 },
     });
 
     logger.info('Session → qa_rounds', { sessionId });
@@ -248,10 +253,6 @@ export class GameService {
     const question = await prisma.question.findUnique({ where: { id: questionId } });
     if (!question || question.sessionId !== sessionId) {
       throw new Error('Invalid question');
-    }
-
-    if (question.round !== session.currentRound) {
-      throw new Error('Not the current round');
     }
 
     // Check user is opposite gender from question author
@@ -274,23 +275,14 @@ export class GameService {
 
     logger.info('Answer submitted', { sessionId, userId, questionId });
 
-    // Check if all answers received for this question
-    const allAnswers = await this.checkAllAnswersReceived(sessionId, question);
-    if (allAnswers) {
-      // UX fix: do NOT interrupt answering with voting.
-      // First collect answers for ALL questions, then run voting rounds.
-      if (session.currentRound < session.totalRounds) {
-        await prisma.session.update({
-          where: { id: sessionId },
-          data: { currentRound: session.currentRound + 1, status: 'qa_rounds' },
-        });
-        logger.info('QA next round', { sessionId, round: session.currentRound + 1 });
-        const state = await this.getSessionState(sessionId);
-        this.onSessionUpdate?.(sessionId, state);
-      } else {
+    const allSessionAnswers = await this.checkAllAnswersReceivedForSession(sessionId);
+    if (allSessionAnswers) {
       await this.startVotingPhase(sessionId);
+      return;
     }
-  }
+
+    const state = await this.getSessionState(sessionId);
+    this.onSessionUpdate?.(sessionId, state);
   }
 
   private async checkAllAnswersReceived(sessionId: string, question: { id: string; authorId: string }): Promise<boolean> {
@@ -302,6 +294,34 @@ export class GameService {
     const answers = await prisma.answer.findMany({ where: { questionId: question.id } });
 
     return answers.length >= respondents.length;
+  }
+
+  private async checkAllAnswersReceivedForSession(sessionId: string): Promise<boolean> {
+    const participants = await this.getSessionParticipants(sessionId);
+    const maleCount = participants.filter(p => p.gender === 'male').length;
+    const femaleCount = participants.filter(p => p.gender === 'female').length;
+
+    const questions = await prisma.question.findMany({
+      where: { sessionId },
+      select: { id: true, author: { select: { gender: true } } },
+    });
+
+    const counts = await prisma.answer.groupBy({
+      by: ['questionId'],
+      where: { question: { sessionId } },
+      _count: { _all: true },
+    });
+    const byQ = new Map<string, number>();
+    for (const c of counts) byQ.set(c.questionId, c._count._all);
+
+    for (const q of questions) {
+      const authorGender = q.author.gender;
+      const required = authorGender === 'male' ? femaleCount : maleCount;
+      const have = byQ.get(q.id) || 0;
+      if (have < required) return false;
+    }
+
+    return true;
   }
 
   private async startVotingPhase(sessionId: string) {
@@ -356,18 +376,8 @@ export class GameService {
     if (!session) return;
 
     if (session.status === 'qa_rounds') {
-      // On timeout: advance QA round, and only start voting after the last QA round.
-      if (session.currentRound < session.totalRounds) {
-        await prisma.session.update({
-          where: { id: sessionId },
-          data: { currentRound: session.currentRound + 1, status: 'qa_rounds' },
-        });
-        logger.info('QA timeout next round', { sessionId, round: session.currentRound + 1 });
-        const state = await this.getSessionState(sessionId);
-        this.onSessionUpdate?.(sessionId, state);
-      } else {
-        await this.startVotingPhase(sessionId);
-      }
+      // QA timeout: move to voting even if some answers are missing.
+      await this.startVotingPhase(sessionId);
     } else if (session.status === 'voting') {
       // Final voting timeout: treat missing voters as "no one" and close results.
       const participants = await prisma.sessionParticipant.findMany({ where: { sessionId } });
@@ -445,21 +455,8 @@ export class GameService {
       females,
     };
 
-    if (session.status === 'qa_rounds' && session.currentRound > 0) {
-      const question = await prisma.question.findFirst({
-        where: { sessionId, round: session.currentRound },
-      });
-      if (question) {
-        state.currentQuestion = {
-          id: question.id,
-          text: question.text,
-          authorId: question.authorId,
-          round: question.round,
-        };
-      }
-    }
-
-    if (session.status === 'voting') {
+    // Provide full question+answer set for QA progress UI and for final voting UI.
+    if (session.status === 'qa_rounds' || session.status === 'voting') {
       const questions = await prisma.question.findMany({
         where: { sessionId },
         select: { id: true, text: true, authorId: true, round: true },
@@ -471,6 +468,14 @@ export class GameService {
       });
       state.questions = questions;
       state.allAnswers = answers;
+    }
+
+    if (session.status === 'voting' || session.status === 'results') {
+      const finalVotes = await prisma.finalVote.findMany({
+        where: { sessionId },
+        select: { voterId: true, votedForId: true },
+      });
+      state.finalVotes = finalVotes;
     }
 
     return state;

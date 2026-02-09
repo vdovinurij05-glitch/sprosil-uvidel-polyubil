@@ -36,6 +36,11 @@ export interface FlatAnswerItem {
   text: string;
 }
 
+export interface FinalVoteItem {
+  voterId: string;
+  votedForId: string | null;
+}
+
 export interface SessionState {
   id: string;
   status: SessionStatus;
@@ -47,6 +52,7 @@ export interface SessionState {
   answers?: AnswerItem[];
   questions?: QuestionItem[];
   allAnswers?: FlatAnswerItem[];
+  finalVotes?: FinalVoteItem[];
   timeRemaining?: number;
 }
 
