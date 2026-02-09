@@ -25,8 +25,8 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
   const user = useGameStore((s) => s.user);
 
   const [activeQ, setActiveQ] = useState<QuestionId | null>(null);
-  const [draftByQ, setDraftByQ] = useState<Record<string, string>>({});
   const [submittedByQ, setSubmittedByQ] = useState<Record<string, boolean>>({});
+  const draftRefByQ = React.useRef<Record<string, string>>({});
 
   if (!sessionState || !user || !user.gender) return null;
 
@@ -68,8 +68,8 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
 
   useEffect(() => {
     // When session changes, reset local state.
-    setDraftByQ({});
     setSubmittedByQ({});
+    draftRefByQ.current = {};
     setActiveQ(null);
   }, [sessionState.id, sessionState.status]);
 
@@ -88,7 +88,7 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
   const activeQuestion = useMemo(() => visibleQuestions.find((q) => q.id === activeQ) || null, [visibleQuestions, activeQ]);
 
   const submitAnswer = (questionId: string) => {
-    const text = (draftByQ[questionId] || "").trim();
+    const text = (draftRefByQ.current[questionId] || "").trim();
     if (!text) return;
 
     const socket = getSocket(initData);
@@ -208,7 +208,7 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
           </div>
         </div>
 
-        <div style={styles.questionText}>{q.text}</div>
+        {!mineDone && <div style={styles.questionText}>{q.text}</div>}
 
         <div style={styles.respondentsRow}>
           {respondents.map((p) => {
@@ -233,8 +233,12 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
           {!mineDone ? (
             <>
               <textarea
-                value={draftByQ[q.id] || ""}
-                onChange={(e) => setDraftByQ((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                key={q.id}
+                defaultValue={draftRefByQ.current[q.id] || ""}
+                onChange={(e) => {
+                  // Uncontrolled input: avoid re-renders per character (Telegram WebView sometimes drops caret).
+                  draftRefByQ.current[q.id] = e.target.value;
+                }}
                 placeholder={"Твой ответ..."}
                 maxLength={500}
                 rows={3}
@@ -242,10 +246,11 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
               />
               <button
                 onClick={() => submitAnswer(q.id)}
-                disabled={!(draftByQ[q.id] || "").trim()}
+                // Validate on click; keep the button always clickable to avoid state-based re-render while typing.
+                disabled={false}
                 style={{
                   ...styles.button,
-                  opacity: !(draftByQ[q.id] || "").trim() ? 0.5 : 1,
+                  opacity: 1,
                 }}
               >
                 Отправить

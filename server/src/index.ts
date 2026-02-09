@@ -14,6 +14,7 @@ import userRoutes from './routes/user';
 import sessionRoutes from './routes/session';
 import reportRoutes from './routes/report';
 import devRoutes from './routes/dev';
+import { execSync } from 'node:child_process';
 
 async function main() {
   // Express
@@ -34,6 +35,16 @@ async function main() {
   // Health check
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Simple version endpoint to debug client caching / deploy state.
+  app.get('/api/version', (_req, res) => {
+    try {
+      const sha = execSync('git rev-parse --short HEAD', { cwd: process.cwd() }).toString().trim();
+      res.json({ ok: true, sha, timestamp: new Date().toISOString() });
+    } catch {
+      res.json({ ok: true, sha: null, timestamp: new Date().toISOString() });
+    }
   });
 
   // API routes
