@@ -230,28 +230,37 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
         </div>
 
         <div style={styles.answerArea}>
-          <textarea
-            value={draftByQ[q.id] || ""}
-            onChange={(e) => setDraftByQ((prev) => ({ ...prev, [q.id]: e.target.value }))}
-            placeholder={mineDone ? "Ответ отправлен" : "Твой ответ..."}
-            disabled={mineDone}
-            maxLength={500}
-            rows={3}
-            style={{ ...styles.textarea, opacity: mineDone ? 0.75 : 1 }}
-          />
-          <button
-            onClick={() => submitAnswer(q.id)}
-            disabled={mineDone || !(draftByQ[q.id] || "").trim()}
-            style={{
-              ...styles.button,
-              opacity: mineDone || !(draftByQ[q.id] || "").trim() ? 0.5 : 1,
-            }}
-          >
-            {mineDone ? "Отправлено" : "Отправить"}
-          </button>
-
-          {mineDone && !complete && <div style={styles.waitHint}>Ждём остальных...</div>}
-          {complete && <div style={{ ...styles.waitHint, color: "#2ECC71" }}>Все ответы получены</div>}
+          {!mineDone ? (
+            <>
+              <textarea
+                value={draftByQ[q.id] || ""}
+                onChange={(e) => setDraftByQ((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                placeholder={"Твой ответ..."}
+                maxLength={500}
+                rows={3}
+                style={styles.textarea}
+              />
+              <button
+                onClick={() => submitAnswer(q.id)}
+                disabled={!(draftByQ[q.id] || "").trim()}
+                style={{
+                  ...styles.button,
+                  opacity: !(draftByQ[q.id] || "").trim() ? 0.5 : 1,
+                }}
+              >
+                Отправить
+              </button>
+            </>
+          ) : (
+            <div style={styles.afterAnswerBox}>
+              <div style={styles.afterAnswerTitle}>Ответ отправлен</div>
+              {!complete ? (
+                <div style={styles.waitHint}>Ждём остальных...</div>
+              ) : (
+                <div style={{ ...styles.waitHint, color: "#2ECC71" }}>Все ответы получены</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -261,19 +270,21 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
 
   return (
     <div style={styles.container}>
-      <div style={styles.roundBadge}>Ответы</div>
-      <Timer />
+      <div style={styles.header}>
+        <div style={styles.roundBadge}>Ответы</div>
+        <Timer />
+      </div>
 
-      <TopBottomRoster />
+      <div style={styles.stage}>
+        <div style={styles.stageTop}>
+          <TopBottomRoster />
+        </div>
 
-      <div style={styles.centerWrap}>
-        <QuestionPills />
-        {activeQuestion && <CenterQuestionCard q={activeQuestion} />}
-        {waitingAllMineDone && (
-          <div style={styles.waitingMessage}>
-            Ты ответил на все вопросы. Ждём остальных...
-          </div>
-        )}
+        <div style={styles.stageCenter}>
+          <QuestionPills />
+          {activeQuestion && <CenterQuestionCard q={activeQuestion} />}
+          {waitingAllMineDone && <div style={styles.waitingMessage}>Ты ответил на все вопросы. Ждём остальных...</div>}
+        </div>
       </div>
     </div>
   );
@@ -285,8 +296,17 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     alignItems: "center",
     padding: 16,
-    gap: 14,
+    gap: 10,
     minHeight: "100vh",
+    height: "100vh",
+  },
+  header: {
+    width: "100%",
+    maxWidth: 420,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
   },
   roundBadge: {
     padding: "6px 16px",
@@ -345,11 +365,25 @@ const styles: Record<string, React.CSSProperties> = {
   rosterSpacer: {
     height: 10,
   },
-  centerWrap: {
+  stage: {
     width: "100%",
     maxWidth: 420,
+    flex: 1,
+    minHeight: 0,
     display: "flex",
     flexDirection: "column",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingBottom: 8,
+  },
+  stageTop: {
+    display: "flex",
+    justifyContent: "center",
+  },
+  stageCenter: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
     gap: 12,
   },
   pillsRow: {
@@ -429,6 +463,20 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
     fontFamily: "inherit",
   },
+  afterAnswerBox: {
+    width: "100%",
+    borderRadius: 14,
+    border: "1px solid rgba(0,0,0,0.08)",
+    background: "rgba(0,0,0,0.03)",
+    padding: 14,
+    textAlign: "center",
+  },
+  afterAnswerTitle: {
+    fontSize: 15,
+    fontWeight: 900,
+    color: "#333",
+    marginBottom: 6,
+  },
   button: {
     padding: "12px 16px",
     borderRadius: 14,
@@ -455,4 +503,3 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
 };
-

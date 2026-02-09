@@ -34,6 +34,12 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ initData }) => {
 
   const finalVotes: FinalVoteItem[] = sessionState?.finalVotes || [];
   const votedBy = useMemo(() => new Map(finalVotes.map((v) => [v.voterId, v.votedForId])), [finalVotes]);
+  const voteSig = useMemo(() => {
+    return [...finalVotes]
+      .map((v) => `${v.voterId}:${v.votedForId ?? ""}`)
+      .sort()
+      .join("|");
+  }, [finalVotes]);
 
   useEffect(() => {
     if (!sessionState) return;
@@ -81,7 +87,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ initData }) => {
 
     setArrows(next);
     initialAnimateRef.current = false;
-  }, [finalVotes, sessionState, layoutTick, loading]);
+  }, [voteSig, layoutTick, loading]);
 
   if (!sessionState) return null;
 
