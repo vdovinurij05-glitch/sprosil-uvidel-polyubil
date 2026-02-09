@@ -12,6 +12,7 @@ const envSchema = z.object({
   AUTO_START_ON_MIN_PLAYERS: z.coerce.boolean().default(true),
   ANSWER_TIMEOUT_SEC: z.coerce.number().default(60),
   VOTE_TIMEOUT_SEC: z.coerce.number().default(30),
+  REVEAL_TIMEOUT_SEC: z.coerce.number().default(7),
 });
 
 function loadConfig() {

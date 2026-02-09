@@ -4,7 +4,7 @@ import { config } from '../config';
 import { containsToxicContent, sanitizeText } from '../utils/moderation';
 
 type Gender = 'male' | 'female';
-type SessionStatus = 'lobby' | 'roster' | 'qa_rounds' | 'voting' | 'results' | 'closed';
+type SessionStatus = 'lobby' | 'roster' | 'qa_rounds' | 'voting' | 'reveal' | 'results' | 'closed';
 
 export interface SessionPlayer {
   userId: string;
@@ -85,7 +85,7 @@ export class GameService {
     const existing = await prisma.sessionParticipant.findFirst({
       where: {
         userId,
-        session: { status: { in: ['lobby', 'roster', 'qa_rounds', 'voting'] } },
+        session: { status: { in: ['lobby', 'roster', 'qa_rounds', 'voting', 'reveal'] } },
       },
       include: { session: true },
     });
@@ -324,6 +324,17 @@ export class GameService {
     return true;
   }
 
+  private async startRevealPhase(sessionId: string) {
+    await prisma.session.update({
+      where: { id: sessionId },
+      data: { status: 'reveal', currentRound: 0 },
+    });
+
+    logger.info('Session -> reveal', { sessionId });
+    const state = await this.getSessionState(sessionId);
+    this.onSessionUpdate?.(sessionId, state);
+  }
+
   private async startVotingPhase(sessionId: string) {
     await prisma.session.update({
       where: { id: sessionId },
@@ -361,7 +372,7 @@ export class GameService {
 
     const allFinalVotes = await this.checkAllFinalVotesReceived(sessionId);
     if (allFinalVotes) {
-      await this.calculateMatches(sessionId);
+      await this.startRevealPhase(sessionId);
     }
   }
 
@@ -379,7 +390,7 @@ export class GameService {
       // QA timeout: move to voting even if some answers are missing.
       await this.startVotingPhase(sessionId);
     } else if (session.status === 'voting') {
-      // Final voting timeout: treat missing voters as "no one" and close results.
+      // Final voting timeout: treat missing voters as "no one" and then reveal arrows.
       const participants = await prisma.sessionParticipant.findMany({ where: { sessionId } });
       for (const p of participants) {
         await prisma.finalVote.upsert({
@@ -388,11 +399,16 @@ export class GameService {
           create: { sessionId, voterId: p.userId, votedForId: null },
         });
       }
+      await this.startRevealPhase(sessionId);
+    } else if (session.status === 'reveal') {
       await this.calculateMatches(sessionId);
     }
   }
 
   async calculateMatches(sessionId: string) {
+    // Idempotent: avoid accumulating duplicates if called multiple times.
+    await prisma.match.deleteMany({ where: { sessionId } });
+
     const participants = await this.getSessionParticipants(sessionId);
     const males = participants.filter(p => p.gender === 'male');
     const females = participants.filter(p => p.gender === 'female');
@@ -470,7 +486,7 @@ export class GameService {
       state.allAnswers = answers;
     }
 
-    if (session.status === 'voting' || session.status === 'results') {
+    if (session.status === 'voting' || session.status === 'reveal' || session.status === 'results') {
       const finalVotes = await prisma.finalVote.findMany({
         where: { sessionId },
         select: { voterId: true, votedForId: true },

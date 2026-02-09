@@ -10,6 +10,7 @@ import { LobbyScreen } from './pages/LobbyScreen';
 import { RosterScreen } from './pages/RosterScreen';
 import { QaRoundScreen } from './pages/QaRoundScreen';
 import { VotingScreen } from './pages/VotingScreen';
+import { RevealScreen } from './pages/RevealScreen';
 import { ResultsScreen } from './pages/ResultsScreen';
 
 declare global {
@@ -95,6 +96,8 @@ const App: React.FC = () => {
         return <QaRoundScreen initData={initData} />;
       case 'voting':
         return <VotingScreen initData={initData} />;
+      case 'reveal':
+        return <RevealScreen />;
       case 'results':
         return <ResultsScreen initData={initData} />;
       default:

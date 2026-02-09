@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { SessionState, MatchResult, User } from '../types';
 
-type Screen = 'loading' | 'gender' | 'start' | 'lobby' | 'roster' | 'qa_rounds' | 'voting' | 'results';
+type Screen = 'loading' | 'gender' | 'start' | 'lobby' | 'roster' | 'qa_rounds' | 'voting' | 'reveal' | 'results';
 
 interface GameStore {
   screen: Screen;
@@ -41,6 +41,7 @@ export const useGameStore = create<GameStore>((set) => ({
       else if (state.status === 'roster') screen = 'roster';
       else if (state.status === 'qa_rounds') screen = 'qa_rounds';
       else if (state.status === 'voting') screen = 'voting';
+      else if (state.status === 'reveal') screen = 'reveal';
       else if (state.status === 'results') screen = 'results';
       return { sessionState: state, screen };
     });

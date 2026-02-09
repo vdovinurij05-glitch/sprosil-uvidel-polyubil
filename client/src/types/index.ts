@@ -1,5 +1,5 @@
 export type Gender = 'male' | 'female';
-export type SessionStatus = 'lobby' | 'roster' | 'qa_rounds' | 'voting' | 'results' | 'closed';
+export type SessionStatus = 'lobby' | 'roster' | 'qa_rounds' | 'voting' | 'reveal' | 'results' | 'closed';
 
 export interface Player {
   userId: string;

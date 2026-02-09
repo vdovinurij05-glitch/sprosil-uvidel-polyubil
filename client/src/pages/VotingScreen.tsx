@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useGameStore } from "../store/useGameStore";
 import { getSocket } from "../utils/socket";
 import { Timer } from "../components/Timer";
@@ -11,31 +11,13 @@ interface VotingScreenProps {
 
 type ChoiceId = string | "__none__";
 
-type Point = { x: number; y: number };
-
-type VoteArrow = {
-  key: string;
-  from: Point;
-  to: Point;
-  animated: boolean;
-};
-
-const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
-
 export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
   const sessionState = useGameStore((s) => s.sessionState);
   const user = useGameStore((s) => s.user);
   const [selectedId, setSelectedId] = useState<ChoiceId | null>(null);
   const [voted, setVoted] = useState(false);
 
-  const boardRef = useRef<HTMLDivElement | null>(null);
-  const nodeRefByUserId = useRef<Record<string, HTMLDivElement | null>>({});
-  const seenVotesRef = useRef<Map<string, string | null>>(new Map());
-  const initialAnimateRef = useRef(true);
-  const [layoutTick, setLayoutTick] = useState(0);
-  const [arrows, setArrows] = useState<VoteArrow[]>([]);
-
-  if (!sessionState || !user) return null;
+  if (!sessionState || !user || !user.gender) return null;
 
   const allPlayers = useMemo(() => [...sessionState.males, ...sessionState.females], [sessionState.males, sessionState.females]);
   const questions: QuestionItem[] = sessionState.questions || [];
@@ -57,12 +39,6 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
     setSelectedId(null);
     setVoted(false);
   }, [sessionState.id, sessionState.status]);
-
-  useEffect(() => {
-    const onResize = () => setLayoutTick((x) => x + 1);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
 
   const getCandidateQA = (candidateId: string) => {
     return myQuestions.map((q) => {
@@ -91,7 +67,6 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
   if (questions.length === 0) {
     return (
       <div style={styles.container}>
-        <style>{css}</style>
         <div style={styles.roundBadge}>Выбор</div>
         <Timer />
         <div style={styles.waitingMessage}>Готовим данные для выбора...</div>
@@ -99,84 +74,11 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
     );
   }
 
-  useLayoutEffect(() => {
-    const boardEl = boardRef.current;
-    if (!boardEl) return;
-
-    const boardRect = boardEl.getBoundingClientRect();
-    const isInitial = initialAnimateRef.current;
-
-    const nextArrows: VoteArrow[] = [];
-
-    for (const v of finalVotes) {
-      if (!v.votedForId) continue;
-
-      const fromEl = nodeRefByUserId.current[v.voterId];
-      const toEl = nodeRefByUserId.current[v.votedForId];
-      if (!fromEl || !toEl) continue;
-
-      const fromRect = fromEl.getBoundingClientRect();
-      const toRect = toEl.getBoundingClientRect();
-
-      const from: Point = {
-        x: fromRect.left - boardRect.left + fromRect.width / 2,
-        y: fromRect.top - boardRect.top + fromRect.height / 2,
-      };
-      const to: Point = {
-        x: toRect.left - boardRect.left + toRect.width / 2,
-        y: toRect.top - boardRect.top + toRect.height / 2,
-      };
-
-      const prev = seenVotesRef.current.get(v.voterId);
-      const animated = isInitial || (prev === undefined && v.votedForId !== null);
-
-      nextArrows.push({
-        key: `${v.voterId}->${v.votedForId}`,
-        from,
-        to,
-        animated,
-      });
-    }
-
-    for (const v of finalVotes) {
-      seenVotesRef.current.set(v.voterId, v.votedForId);
-    }
-
-    setArrows(nextArrows);
-    initialAnimateRef.current = false;
-  }, [finalVotes, layoutTick]);
-
   const totalVoters = sessionState.males.length + sessionState.females.length;
   const totalVoted = finalVotes.length;
 
   const maleVoted = sessionState.males.filter((p) => votedBy.has(p.userId)).length;
   const femaleVoted = sessionState.females.filter((p) => votedBy.has(p.userId)).length;
-
-  const ArrowSvg = () => {
-    return (
-      <svg style={styles.arrowSvg} width="100%" height="100%" aria-hidden="true">
-        <defs>
-          <marker id="arrowHead" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-            <path d="M0,0 L0,6 L9,3 z" fill="#FF6B6B" />
-          </marker>
-        </defs>
-
-        {arrows.map((a) => {
-          const dx = a.to.x - a.from.x;
-          const dy = a.to.y - a.from.y;
-          const bend = clamp(Math.hypot(dx, dy) * 0.25, 24, 90);
-          const cx1 = a.from.x;
-          const cy1 = a.from.y + (dy >= 0 ? bend : -bend);
-          const cx2 = a.to.x;
-          const cy2 = a.to.y - (dy >= 0 ? bend : -bend);
-
-          const d = `M ${a.from.x} ${a.from.y} C ${cx1} ${cy1} ${cx2} ${cy2} ${a.to.x} ${a.to.y}`;
-
-          return <path key={a.key} d={d} className={a.animated ? "votePath votePath--animated" : "votePath"} markerEnd="url(#arrowHead)" />;
-        })}
-      </svg>
-    );
-  };
 
   const PlayerNode: React.FC<{
     userId: string;
@@ -191,9 +93,6 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
 
     return (
       <div
-        ref={(el) => {
-          nodeRefByUserId.current[userId] = el;
-        }}
         style={{
           ...styles.playerNode,
           opacity: hasVoted ? 1 : 0.55,
@@ -204,9 +103,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
         <Avatar photoUrl={photoUrl} firstName={firstName} size={32} />
         <div style={styles.playerName}>{firstName}</div>
         {isMe && <div style={styles.meBadge}>ты</div>}
-        {hasVoted && (
-          <div style={{ ...styles.voteBadge, color: skipped ? "#999" : "#2ECC71" }}>{skipped ? "пропуск" : isMe ? "твой выбор" : "выбрал"}</div>
-        )}
+        {hasVoted && <div style={{ ...styles.voteBadge, color: skipped ? "#999" : "#2ECC71" }}>{skipped ? "никого" : "готово"}</div>}
         <div
           style={{
             ...styles.rolePill,
@@ -222,14 +119,10 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
 
   return (
     <div style={styles.container}>
-      <style>{css}</style>
-
       <div style={styles.roundBadge}>Выбор: один человек или "никого"</div>
       <Timer />
 
-      <div ref={boardRef} style={styles.voteBoard}>
-        <ArrowSvg />
-
+      <div style={styles.voteBoard}>
         <div style={styles.voteBoardInner}>
           <div style={styles.boardRowTitleWrap}>
             <div style={styles.boardRowTitle}>Парни</div>
@@ -285,7 +178,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
                 >
                   <div style={styles.answerHeader}>
                     <Avatar photoUrl={player.photoUrl} firstName={player.firstName} size={32} />
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{player.firstName}</span>
+                    <span style={{ fontWeight: 800, fontSize: 14 }}>{player.firstName}</span>
                     {selectedId === player.userId && <span style={styles.selectedBadge}>♥</span>}
                   </div>
 
@@ -308,7 +201,7 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
               }}
             >
               <div style={styles.answerHeader}>
-                <span style={{ fontWeight: 600, fontSize: 14 }}>Никого</span>
+                <span style={{ fontWeight: 800, fontSize: 14 }}>Никого</span>
                 {selectedId === "__none__" && <span style={styles.selectedBadge}>♥</span>}
               </div>
               <p style={styles.answerText}>Пропустить выбор</p>
@@ -333,29 +226,6 @@ export const VotingScreen: React.FC<VotingScreenProps> = ({ initData }) => {
   );
 };
 
-const css = `
-.votePath {
-  fill: none;
-  stroke: #FF6B6B;
-  stroke-width: 3;
-  stroke-linecap: round;
-  opacity: 0.92;
-}
-.votePath--animated {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000;
-  animation: vote-draw 720ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards, vote-glow 720ms ease-out forwards;
-}
-@keyframes vote-draw {
-  to { stroke-dashoffset: 0; }
-}
-@keyframes vote-glow {
-  0% { opacity: 0.0; }
-  30% { opacity: 1.0; }
-  100% { opacity: 0.92; }
-}
-`;
-
 const styles: Record<string, React.CSSProperties> = {
   container: {
     display: "flex",
@@ -370,15 +240,20 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 20,
     backgroundColor: "#fff0f0",
     fontSize: 14,
-    fontWeight: 600,
+    fontWeight: 800,
     color: "#FF6B6B",
     marginTop: 16,
+    textAlign: "center",
+  },
+  instruction: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#444",
     textAlign: "center",
   },
   voteBoard: {
     width: "100%",
     maxWidth: 420,
-    position: "relative",
     borderRadius: 18,
     border: "1px solid #f0f0f0",
     background: "linear-gradient(180deg, rgba(74,144,217,0.04) 0%, rgba(255,107,107,0.04) 100%)",
@@ -386,15 +261,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
   },
   voteBoardInner: {
-    position: "relative",
     padding: 14,
-    zIndex: 1,
-  },
-  arrowSvg: {
-    position: "absolute",
-    inset: 0,
-    zIndex: 4,
-    pointerEvents: "none",
   },
   boardRowTitleWrap: {
     display: "flex",
@@ -404,7 +271,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   boardRowTitle: {
     fontSize: 12,
-    fontWeight: 800,
+    fontWeight: 900,
     color: "#555",
     textTransform: "uppercase",
     letterSpacing: 0.7,
@@ -412,7 +279,7 @@ const styles: Record<string, React.CSSProperties> = {
   boardRowProgress: {
     marginLeft: "auto",
     fontSize: 12,
-    fontWeight: 800,
+    fontWeight: 900,
     color: "#777",
     background: "rgba(0,0,0,0.04)",
     padding: "3px 10px",
@@ -432,7 +299,7 @@ const styles: Record<string, React.CSSProperties> = {
   totalProgress: {
     marginTop: 12,
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 800,
     color: "#666",
     textAlign: "center",
   },
@@ -450,7 +317,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   playerName: {
     fontSize: 13,
-    fontWeight: 800,
+    fontWeight: 900,
     color: "#222",
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -479,12 +346,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     padding: "2px 8px",
     borderRadius: 999,
-  },
-  instruction: {
-    fontSize: 15,
-    fontWeight: 600,
-    color: "#444",
-    textAlign: "center",
   },
   answersList: {
     width: "100%",
@@ -525,7 +386,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "#FF6B6B",
     color: "#fff",
     fontSize: 16,
-    fontWeight: 600,
+    fontWeight: 800,
     cursor: "pointer",
     width: "100%",
     maxWidth: 360,
@@ -535,9 +396,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 14,
     background: "#f5f5f5",
     fontSize: 14,
-    fontWeight: 600,
+    fontWeight: 800,
     color: "#555",
     textAlign: "center",
     maxWidth: 360,
   },
 };
+

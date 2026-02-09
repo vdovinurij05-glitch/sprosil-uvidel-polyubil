@@ -10,15 +10,16 @@ interface QaRoundScreenProps {
 }
 
 type QuestionId = string;
+type Gender = "male" | "female";
 
 type MiniPlayer = {
   userId: string;
   firstName: string;
   photoUrl: string | null;
-  gender: "male" | "female";
+  gender: Gender;
 };
 
-const getOppositeGender = (g: "male" | "female") => (g === "male" ? "female" : "male");
+const oppositeGender = (g: Gender) => (g === "male" ? "female" : "male");
 
 export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
   const sessionState = useGameStore((s) => s.sessionState);
@@ -34,24 +35,24 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
   const allAnswers: FlatAnswerItem[] = sessionState.allAnswers || [];
 
   const allPlayers: MiniPlayer[] = useMemo(
-    () => [...sessionState.males, ...sessionState.females].map((p) => ({ ...p, gender: p.gender as "male" | "female" })),
+    () => [...sessionState.males, ...sessionState.females].map((p) => ({ ...p, gender: p.gender as Gender })),
     [sessionState.males, sessionState.females],
   );
 
-  const opposite = getOppositeGender(user.gender);
-  const oppositePlayers = opposite === "male" ? sessionState.males : sessionState.females;
+  const opposite = oppositeGender(user.gender);
 
-  // You can answer ONLY questions authored by opposite gender.
+  // You answer only opposite-gender questions.
   const visibleQuestions = useMemo(() => {
-    return questions.filter((q) => {
-      const author = allPlayers.find((p) => p.userId === q.authorId);
-      return author?.gender === opposite;
-    });
+    return questions
+      .filter((q) => {
+        const author = allPlayers.find((p) => p.userId === q.authorId);
+        return author?.gender === opposite;
+      })
+      .sort((a, b) => a.round - b.round);
   }, [questions, allPlayers, opposite]);
 
   const respondentsForQuestion = (q: QuestionItem) => {
-    // Opposite gender question -> respondents are the user's gender.
-    // E.g. if question author is female, respondents are males.
+    // Opposite-gender question -> respondents are the user's gender.
     return user.gender === "male" ? sessionState.males : sessionState.females;
   };
 
@@ -64,19 +65,19 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
     return total > 0 && done >= total;
   };
 
-  const myUnanswered = useMemo(() => visibleQuestions.filter((q) => !hasUserAnswered(q.id) && !submittedByQ[q.id]), [visibleQuestions, allAnswers, submittedByQ]);
+  const myUnanswered = useMemo(
+    () => visibleQuestions.filter((q) => !hasUserAnswered(q.id) && !submittedByQ[q.id]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visibleQuestions, allAnswers, submittedByQ],
+  );
 
   useEffect(() => {
-    // When session changes, reset local state.
     setSubmittedByQ({});
     draftRefByQ.current = {};
     setActiveQ(null);
   }, [sessionState.id, sessionState.status]);
 
   useEffect(() => {
-    // Pick a sensible default question:
-    // 1) first unanswered
-    // 2) otherwise first visible
     if (visibleQuestions.length === 0) {
       setActiveQ(null);
       return;
@@ -89,7 +90,10 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
 
   const submitAnswer = (questionId: string) => {
     const text = (draftRefByQ.current[questionId] || "").trim();
-    if (!text) return;
+    if (!text) {
+      alert("Напиши ответ перед отправкой");
+      return;
+    }
 
     const socket = getSocket(initData);
     socket.emit("answer:submit", { sessionId: sessionState.id, questionId, answer: text }, (res: any) => {
@@ -104,58 +108,32 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
     });
   };
 
-  const TopBottomRoster: React.FC = () => {
-    const renderRow = (players: typeof sessionState.males, label: string) => {
-      const cells = [...players];
-      while (cells.length < 3) {
-        cells.push({
-          userId: `__empty__${cells.length}`,
-          telegramId: 0,
-          firstName: "—",
-          username: null,
-          photoUrl: null,
-          gender: label === "Парни" ? "male" : "female",
-        } as any);
-      }
-      return (
-        <div style={styles.rosterRowWrap}>
-          <div style={styles.rosterRowTitle}>{label}</div>
-          <div style={styles.rosterRow}>
-            {cells.slice(0, 3).map((p) => {
-              const isEmpty = (p as any).telegramId === 0 && p.firstName === "—";
-              return (
-                <div key={p.userId} style={{ ...styles.rosterCell, opacity: isEmpty ? 0.35 : 1 }}>
-                  <Avatar photoUrl={p.photoUrl} firstName={p.firstName} size={42} />
-                  <div style={styles.rosterName}>{p.firstName}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
-    };
+  const RosterStrip: React.FC<{ players: typeof sessionState.males }> = ({ players }) => {
+    const cells = [...players];
+    while (cells.length < 3) {
+      cells.push({
+        userId: `__empty__:${cells.length}`,
+        telegramId: 0,
+        firstName: "—",
+        username: null,
+        photoUrl: null,
+        gender: "male",
+      } as any);
+    }
 
     return (
-      <div style={styles.rosterWrap}>
-        {renderRow(sessionState.males, "Парни")}
-        <div style={styles.rosterSpacer} />
-        {renderRow(sessionState.females, "Девушки")}
+      <div style={styles.strip}>
+        {cells.slice(0, 3).map((p) => {
+          const isEmpty = (p as any).telegramId === 0 && p.firstName === "—";
+          return (
+            <div key={p.userId} style={{ ...styles.stripCell, opacity: isEmpty ? 0.35 : 1 }}>
+              <Avatar photoUrl={p.photoUrl} firstName={p.firstName} size={46} />
+            </div>
+          );
+        })}
       </div>
     );
   };
-
-  if (visibleQuestions.length === 0) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.roundBadge}>Ответы</div>
-        <Timer />
-        <TopBottomRoster />
-        <div style={styles.waitingMessage}>
-          Нет вопросов от противоположной стороны. Ждём игроков...
-        </div>
-      </div>
-    );
-  }
 
   const QuestionPills: React.FC = () => {
     return (
@@ -199,7 +177,7 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
             {author && (
               <>
                 <Avatar photoUrl={author.photoUrl} firstName={author.firstName} size={28} />
-                <div style={{ fontSize: 12, color: "#777" }}>{author.firstName}</div>
+                <div style={{ fontSize: 12, color: "#777", fontWeight: 800 }}>{author.firstName}</div>
               </>
             )}
           </div>
@@ -236,7 +214,7 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
                 key={q.id}
                 defaultValue={draftRefByQ.current[q.id] || ""}
                 onChange={(e) => {
-                  // Uncontrolled input: avoid re-renders per character (Telegram WebView sometimes drops caret).
+                  // Uncontrolled input: avoid per-char re-render (Telegram WebView sometimes drops caret).
                   draftRefByQ.current[q.id] = e.target.value;
                 }}
                 placeholder={"Твой ответ..."}
@@ -244,15 +222,7 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
                 rows={3}
                 style={styles.textarea}
               />
-              <button
-                onClick={() => submitAnswer(q.id)}
-                // Validate on click; keep the button always clickable to avoid state-based re-render while typing.
-                disabled={false}
-                style={{
-                  ...styles.button,
-                  opacity: 1,
-                }}
-              >
+              <button onClick={() => submitAnswer(q.id)} style={styles.button}>
                 Отправить
               </button>
             </>
@@ -271,6 +241,29 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
     );
   };
 
+  if (visibleQuestions.length === 0) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <div style={styles.roundBadge}>Ответы</div>
+          <Timer />
+        </div>
+
+        <div style={styles.stage}>
+          <div style={styles.stageTop}>
+            <RosterStrip players={sessionState.males} />
+          </div>
+          <div style={styles.stageCenter}>
+            <div style={styles.waitingMessage}>Нет вопросов от противоположной стороны. Ждём игроков...</div>
+          </div>
+          <div style={styles.stageBottom}>
+            <RosterStrip players={sessionState.females} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const waitingAllMineDone = myUnanswered.length === 0;
 
   return (
@@ -282,13 +275,17 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
 
       <div style={styles.stage}>
         <div style={styles.stageTop}>
-          <TopBottomRoster />
+          <RosterStrip players={sessionState.males} />
         </div>
 
         <div style={styles.stageCenter}>
           <QuestionPills />
           {activeQuestion && <CenterQuestionCard q={activeQuestion} />}
           {waitingAllMineDone && <div style={styles.waitingMessage}>Ты ответил на все вопросы. Ждём остальных...</div>}
+        </div>
+
+        <div style={styles.stageBottom}>
+          <RosterStrip players={sessionState.females} />
         </div>
       </div>
     </div>
@@ -318,78 +315,59 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 20,
     backgroundColor: "#f0f0f0",
     fontSize: 14,
-    fontWeight: 700,
+    fontWeight: 800,
     color: "#444",
     marginTop: 8,
-  },
-  rosterWrap: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 18,
-    border: "1px solid #eee",
-    background: "#fff",
-    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
-    padding: 12,
-  },
-  rosterRowWrap: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
-  rosterRowTitle: {
-    fontSize: 12,
-    fontWeight: 900,
-    color: "#666",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  rosterRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: 10,
-  },
-  rosterCell: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 8,
-    padding: 10,
-    borderRadius: 14,
-    border: "1px solid #f1f1f1",
-    background: "#fafafa",
-  },
-  rosterName: {
-    fontSize: 12,
-    fontWeight: 800,
-    color: "#333",
-    maxWidth: 110,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  rosterSpacer: {
-    height: 10,
   },
   stage: {
     width: "100%",
     maxWidth: 420,
     flex: 1,
     minHeight: 0,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
+    display: "grid",
+    gridTemplateRows: "auto 1fr auto",
     gap: 12,
     paddingBottom: 8,
   },
   stageTop: {
     display: "flex",
     justifyContent: "center",
+    borderRadius: 18,
+    border: "1px solid #eee",
+    background: "#fff",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+    padding: 12,
   },
   stageCenter: {
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
     gap: 12,
+    minHeight: 0,
+  },
+  stageBottom: {
+    display: "flex",
+    justifyContent: "center",
+    borderRadius: 18,
+    border: "1px solid #eee",
+    background: "#fff",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+    padding: 12,
+  },
+  strip: {
+    width: "100%",
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 10,
+  },
+  stripCell: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 8,
+    borderRadius: 16,
+    border: "1px solid rgba(0,0,0,0.06)",
+    background: "rgba(250,250,250,0.9)",
   },
   pillsRow: {
     display: "flex",
@@ -436,7 +414,7 @@ const styles: Record<string, React.CSSProperties> = {
   questionText: {
     marginTop: 10,
     fontSize: 16,
-    fontWeight: 800,
+    fontWeight: 900,
     color: "#1a1a1a",
     lineHeight: 1.35,
   },
@@ -468,6 +446,16 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
     fontFamily: "inherit",
   },
+  button: {
+    padding: "12px 16px",
+    borderRadius: 14,
+    border: "none",
+    backgroundColor: "#FF6B6B",
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: 900,
+    cursor: "pointer",
+  },
   afterAnswerBox: {
     width: "100%",
     borderRadius: 14,
@@ -482,29 +470,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#333",
     marginBottom: 6,
   },
-  button: {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    backgroundColor: "#FF6B6B",
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: "pointer",
-  },
   waitingMessage: {
     padding: "14px 16px",
     borderRadius: 14,
     background: "#f5f5f5",
     fontSize: 14,
-    fontWeight: 700,
+    fontWeight: 900,
     color: "#555",
     textAlign: "center",
   },
   waitHint: {
     fontSize: 13,
-    fontWeight: 800,
+    fontWeight: 900,
     color: "#777",
     textAlign: "center",
   },
 };
+

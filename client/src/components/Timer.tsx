@@ -1,5 +1,5 @@
-import React from 'react';
-import { useGameStore } from '../store/useGameStore';
+import React from "react";
+import { useGameStore } from "../store/useGameStore";
 
 export const Timer: React.FC = () => {
   const timer = useGameStore((s) => s.timer);
@@ -12,16 +12,16 @@ export const Timer: React.FC = () => {
     <div
       style={{
         fontSize: 24,
-        fontWeight: 'bold',
-        color: isUrgent ? '#FF4444' : '#666',
-        textAlign: 'center',
-        padding: '8px 16px',
+        fontWeight: 900,
+        color: isUrgent ? "#FF4444" : "#666",
+        textAlign: "center",
+        padding: "8px 16px",
         borderRadius: 12,
-        backgroundColor: isUrgent ? 'rgba(255,68,68,0.1)' : 'rgba(0,0,0,0.05)',
-        animation: isUrgent ? 'pulse 1s infinite' : undefined,
+        backgroundColor: isUrgent ? "rgba(255,68,68,0.1)" : "rgba(0,0,0,0.05)",
       }}
     >
       {timer}с
     </div>
   );
 };
+
