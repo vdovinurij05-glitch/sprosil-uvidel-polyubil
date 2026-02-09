@@ -1,111 +1,225 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useGameStore } from '../store/useGameStore';
-import { getSocket } from '../utils/socket';
-import { Timer } from '../components/Timer';
-import { Avatar } from '../components/Avatar';
-import type { FlatAnswerItem, QuestionItem } from '../types';
+import React, { useEffect, useMemo, useState } from "react";
+import { useGameStore } from "../store/useGameStore";
+import { getSocket } from "../utils/socket";
+import { Timer } from "../components/Timer";
+import { Avatar } from "../components/Avatar";
+import type { FlatAnswerItem, QuestionItem } from "../types";
 
 interface QaRoundScreenProps {
   initData: string;
 }
 
+type QuestionId = string;
+
+type MiniPlayer = {
+  userId: string;
+  firstName: string;
+  photoUrl: string | null;
+  gender: "male" | "female";
+};
+
+const getOppositeGender = (g: "male" | "female") => (g === "male" ? "female" : "male");
+
 export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
   const sessionState = useGameStore((s) => s.sessionState);
   const user = useGameStore((s) => s.user);
 
+  const [activeQ, setActiveQ] = useState<QuestionId | null>(null);
   const [draftByQ, setDraftByQ] = useState<Record<string, string>>({});
-  const [submitted, setSubmitted] = useState<Record<string, boolean>>({});
+  const [submittedByQ, setSubmittedByQ] = useState<Record<string, boolean>>({});
 
-  if (!sessionState || !user) return null;
+  if (!sessionState || !user || !user.gender) return null;
 
   const questions: QuestionItem[] = sessionState.questions || [];
   const allAnswers: FlatAnswerItem[] = sessionState.allAnswers || [];
-  const allPlayers = useMemo(() => [...sessionState.males, ...sessionState.females], [sessionState.males, sessionState.females]);
 
-  const maleQuestions = questions.filter((q) => {
-    const a = allPlayers.find((p) => p.userId === q.authorId);
-    return a?.gender === 'male';
-  });
-  const femaleQuestions = questions.filter((q) => {
-    const a = allPlayers.find((p) => p.userId === q.authorId);
-    return a?.gender === 'female';
-  });
+  const allPlayers: MiniPlayer[] = useMemo(
+    () => [...sessionState.males, ...sessionState.females].map((p) => ({ ...p, gender: p.gender as "male" | "female" })),
+    [sessionState.males, sessionState.females],
+  );
 
-  // You answer opposite gender questions.
-  const canAnswerQuestion = (q: QuestionItem) => {
-    const author = allPlayers.find((p) => p.userId === q.authorId);
-    return author?.gender && author.gender !== user.gender;
-  };
+  const opposite = getOppositeGender(user.gender);
+  const oppositePlayers = opposite === "male" ? sessionState.males : sessionState.females;
+
+  // You can answer ONLY questions authored by opposite gender.
+  const visibleQuestions = useMemo(() => {
+    return questions.filter((q) => {
+      const author = allPlayers.find((p) => p.userId === q.authorId);
+      return author?.gender === opposite;
+    });
+  }, [questions, allPlayers, opposite]);
 
   const respondentsForQuestion = (q: QuestionItem) => {
-    const author = allPlayers.find((p) => p.userId === q.authorId);
-    if (!author) return [];
-    return author.gender === 'male' ? sessionState.females : sessionState.males;
+    // Opposite gender question -> respondents are the user's gender.
+    // E.g. if question author is female, respondents are males.
+    return user.gender === "male" ? sessionState.males : sessionState.females;
   };
 
-  const answerCountForQuestion = (questionId: string) => allAnswers.filter((a) => a.questionId === questionId).length;
+  const countAnswersForQuestion = (questionId: string) => allAnswers.filter((a) => a.questionId === questionId).length;
+  const hasUserAnswered = (questionId: string) => allAnswers.some((a) => a.questionId === questionId && a.authorId === user.id);
 
-  const hasUserAnswered = (questionId: string, userId: string) =>
-    allAnswers.some((a) => a.questionId === questionId && a.authorId === userId);
+  const isQuestionComplete = (q: QuestionItem) => {
+    const total = respondentsForQuestion(q).length;
+    const done = countAnswersForQuestion(q.id);
+    return total > 0 && done >= total;
+  };
 
-  // When session changes, reset local state.
+  const myUnanswered = useMemo(() => visibleQuestions.filter((q) => !hasUserAnswered(q.id) && !submittedByQ[q.id]), [visibleQuestions, allAnswers, submittedByQ]);
+
   useEffect(() => {
+    // When session changes, reset local state.
     setDraftByQ({});
-    setSubmitted({});
+    setSubmittedByQ({});
+    setActiveQ(null);
   }, [sessionState.id, sessionState.status]);
 
+  useEffect(() => {
+    // Pick a sensible default question:
+    // 1) first unanswered
+    // 2) otherwise first visible
+    if (visibleQuestions.length === 0) {
+      setActiveQ(null);
+      return;
+    }
+    const next = myUnanswered[0]?.id || visibleQuestions[0]?.id;
+    setActiveQ((prev) => prev ?? next);
+  }, [visibleQuestions, myUnanswered]);
+
+  const activeQuestion = useMemo(() => visibleQuestions.find((q) => q.id === activeQ) || null, [visibleQuestions, activeQ]);
+
   const submitAnswer = (questionId: string) => {
-    const text = (draftByQ[questionId] || '').trim();
+    const text = (draftByQ[questionId] || "").trim();
     if (!text) return;
 
     const socket = getSocket(initData);
-    socket.emit(
-      'answer:submit',
-      { sessionId: sessionState.id, questionId, answer: text },
-      (res: any) => {
-        if (res.ok) {
-          setSubmitted((prev) => ({ ...prev, [questionId]: true }));
-        } else {
-          alert(res.error);
-        }
-      },
+    socket.emit("answer:submit", { sessionId: sessionState.id, questionId, answer: text }, (res: any) => {
+      if (res.ok) {
+        setSubmittedByQ((prev) => ({ ...prev, [questionId]: true }));
+        // Auto move to next unanswered question (if any).
+        const next = myUnanswered.find((q) => q.id !== questionId);
+        if (next) setActiveQ(next.id);
+      } else {
+        alert(res.error);
+      }
+    });
+  };
+
+  const TopBottomRoster: React.FC = () => {
+    const renderRow = (players: typeof sessionState.males, label: string) => {
+      const cells = [...players];
+      while (cells.length < 3) {
+        cells.push({
+          userId: `__empty__${cells.length}`,
+          telegramId: 0,
+          firstName: "—",
+          username: null,
+          photoUrl: null,
+          gender: label === "Парни" ? "male" : "female",
+        } as any);
+      }
+      return (
+        <div style={styles.rosterRowWrap}>
+          <div style={styles.rosterRowTitle}>{label}</div>
+          <div style={styles.rosterRow}>
+            {cells.slice(0, 3).map((p) => {
+              const isEmpty = (p as any).telegramId === 0 && p.firstName === "—";
+              return (
+                <div key={p.userId} style={{ ...styles.rosterCell, opacity: isEmpty ? 0.35 : 1 }}>
+                  <Avatar photoUrl={p.photoUrl} firstName={p.firstName} size={42} />
+                  <div style={styles.rosterName}>{p.firstName}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div style={styles.rosterWrap}>
+        {renderRow(sessionState.males, "Парни")}
+        <div style={styles.rosterSpacer} />
+        {renderRow(sessionState.females, "Девушки")}
+      </div>
     );
   };
 
-  const QuestionCard: React.FC<{ q: QuestionItem }> = ({ q }) => {
-    const author = allPlayers.find((p) => p.userId === q.authorId);
+  if (visibleQuestions.length === 0) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.roundBadge}>Ответы</div>
+        <Timer />
+        <TopBottomRoster />
+        <div style={styles.waitingMessage}>
+          Нет вопросов от противоположной стороны. Ждём игроков...
+        </div>
+      </div>
+    );
+  }
+
+  const QuestionPills: React.FC = () => {
+    return (
+      <div style={styles.pillsRow}>
+        {visibleQuestions.map((q, idx) => {
+          const done = isQuestionComplete(q);
+          const mineDone = hasUserAnswered(q.id) || submittedByQ[q.id];
+          const isActive = q.id === activeQ;
+          return (
+            <button
+              key={q.id}
+              onClick={() => setActiveQ(q.id)}
+              style={{
+                ...styles.pill,
+                borderColor: isActive ? "#FF6B6B" : "#e7e7e7",
+                background: isActive ? "rgba(255,107,107,0.10)" : "#fff",
+                opacity: mineDone ? 0.85 : 1,
+              }}
+            >
+              <span style={{ fontWeight: 900 }}>Вопрос {idx + 1}</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: done ? "#2ECC71" : "#999" }}>{done ? "готово" : "..."}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const CenterQuestionCard: React.FC<{ q: QuestionItem }> = ({ q }) => {
+    const author = allPlayers.find((p) => p.userId === q.authorId) || null;
     const respondents = respondentsForQuestion(q);
     const total = respondents.length;
-    const done = answerCountForQuestion(q.id);
-    const iCanAnswer = canAnswerQuestion(q);
-    const already = hasUserAnswered(q.id, user.id) || submitted[q.id];
+    const done = countAnswersForQuestion(q.id);
+    const mineDone = hasUserAnswered(q.id) || submittedByQ[q.id];
+    const complete = isQuestionComplete(q);
 
     return (
-      <div style={styles.qCard}>
-        <div style={styles.qHeader}>
-          {author && (
-            <>
-              <Avatar photoUrl={author.photoUrl} firstName={author.firstName} size={26} />
-              <div style={{ fontSize: 12, color: '#777' }}>{author.firstName}</div>
-            </>
-          )}
-          <div style={styles.qProgress}>
+      <div style={styles.centerCard}>
+        <div style={styles.centerCardTop}>
+          <div style={styles.centerMeta}>
+            {author && (
+              <>
+                <Avatar photoUrl={author.photoUrl} firstName={author.firstName} size={28} />
+                <div style={{ fontSize: 12, color: "#777" }}>{author.firstName}</div>
+              </>
+            )}
+          </div>
+          <div style={styles.progressBadge}>
             {done}/{total}
           </div>
         </div>
 
-        <div style={styles.qText}>{q.text}</div>
+        <div style={styles.questionText}>{q.text}</div>
 
         <div style={styles.respondentsRow}>
           {respondents.map((p) => {
-            const ok = hasUserAnswered(q.id, p.userId);
+            const ok = allAnswers.some((a) => a.questionId === q.id && a.authorId === p.userId);
             return (
               <div
                 key={p.userId}
                 style={{
                   ...styles.dot,
-                  borderColor: ok ? '#2ECC71' : '#ddd',
-                  backgroundColor: ok ? 'rgba(46,204,113,0.12)' : '#fff',
+                  borderColor: ok ? "#2ECC71" : "#ddd",
+                  backgroundColor: ok ? "rgba(46,204,113,0.12)" : "#fff",
                 }}
                 title={p.firstName}
               >
@@ -115,65 +229,51 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
           })}
         </div>
 
-        {iCanAnswer && (
-          <div style={styles.answerArea}>
-            <textarea
-              value={draftByQ[q.id] || ''}
-              onChange={(e) => setDraftByQ((prev) => ({ ...prev, [q.id]: e.target.value }))}
-              placeholder={already ? 'Ответ отправлен' : 'Твой ответ...'}
-              disabled={already}
-              maxLength={500}
-              rows={2}
-              style={{ ...styles.textarea, opacity: already ? 0.7 : 1 }}
-            />
-            <button
-              onClick={() => submitAnswer(q.id)}
-              disabled={already || !(draftByQ[q.id] || '').trim()}
-              style={{
-                ...styles.button,
-                opacity: already || !(draftByQ[q.id] || '').trim() ? 0.5 : 1,
-              }}
-            >
-              {already ? 'Отправлено' : 'Отправить'}
-            </button>
-          </div>
-        )}
+        <div style={styles.answerArea}>
+          <textarea
+            value={draftByQ[q.id] || ""}
+            onChange={(e) => setDraftByQ((prev) => ({ ...prev, [q.id]: e.target.value }))}
+            placeholder={mineDone ? "Ответ отправлен" : "Твой ответ..."}
+            disabled={mineDone}
+            maxLength={500}
+            rows={3}
+            style={{ ...styles.textarea, opacity: mineDone ? 0.75 : 1 }}
+          />
+          <button
+            onClick={() => submitAnswer(q.id)}
+            disabled={mineDone || !(draftByQ[q.id] || "").trim()}
+            style={{
+              ...styles.button,
+              opacity: mineDone || !(draftByQ[q.id] || "").trim() ? 0.5 : 1,
+            }}
+          >
+            {mineDone ? "Отправлено" : "Отправить"}
+          </button>
+
+          {mineDone && !complete && <div style={styles.waitHint}>Ждём остальных...</div>}
+          {complete && <div style={{ ...styles.waitHint, color: "#2ECC71" }}>Все ответы получены</div>}
+        </div>
       </div>
     );
   };
 
-  if (questions.length === 0) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.roundBadge}>Ответы</div>
-        <Timer />
-        <div style={styles.waitingMessage}>Ждём вопросы...</div>
-      </div>
-    );
-  }
+  const waitingAllMineDone = myUnanswered.length === 0;
 
   return (
     <div style={styles.container}>
-      <div style={styles.roundBadge}>Раунд ответов: все вопросы сразу</div>
-
+      <div style={styles.roundBadge}>Ответы</div>
       <Timer />
 
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>Вопросы парней</div>
-        <div style={styles.grid}>
-          {maleQuestions.map((q) => (
-            <QuestionCard key={q.id} q={q} />
-          ))}
-        </div>
-      </div>
+      <TopBottomRoster />
 
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>Вопросы девушек</div>
-        <div style={styles.grid}>
-          {femaleQuestions.map((q) => (
-            <QuestionCard key={q.id} q={q} />
-          ))}
-        </div>
+      <div style={styles.centerWrap}>
+        <QuestionPills />
+        {activeQuestion && <CenterQuestionCard q={activeQuestion} />}
+        {waitingAllMineDone && (
+          <div style={styles.waitingMessage}>
+            Ты ответил на все вопросы. Ждём остальных...
+          </div>
+        )}
       </div>
     </div>
   );
@@ -181,115 +281,178 @@ export const QaRoundScreen: React.FC<QaRoundScreenProps> = ({ initData }) => {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
     padding: 16,
-    gap: 16,
-    minHeight: '100vh',
+    gap: 14,
+    minHeight: "100vh",
   },
   roundBadge: {
-    padding: '6px 16px',
+    padding: "6px 16px",
     borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: "#f0f0f0",
     fontSize: 14,
-    fontWeight: 600,
-    color: '#444',
+    fontWeight: 700,
+    color: "#444",
     marginTop: 8,
   },
-  section: {
-    width: '100%',
+  rosterWrap: {
+    width: "100%",
     maxWidth: 420,
+    borderRadius: 18,
+    border: "1px solid #eee",
+    background: "#fff",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+    padding: 12,
   },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#666',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  grid: {
-    display: 'flex',
-    flexDirection: 'column',
+  rosterRowWrap: {
+    display: "flex",
+    flexDirection: "column",
     gap: 10,
   },
-  qCard: {
-    borderRadius: 16,
-    backgroundColor: '#fff',
-    border: '1px solid #eee',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
+  rosterRowTitle: {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#666",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  rosterRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 10,
+  },
+  rosterCell: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+    padding: 10,
+    borderRadius: 14,
+    border: "1px solid #f1f1f1",
+    background: "#fafafa",
+  },
+  rosterName: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#333",
+    maxWidth: 110,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  rosterSpacer: {
+    height: 10,
+  },
+  centerWrap: {
+    width: "100%",
+    maxWidth: 420,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  pillsRow: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  pill: {
+    border: "2px solid #e7e7e7",
+    background: "#fff",
+    padding: "10px 12px",
+    borderRadius: 999,
+    cursor: "pointer",
+    fontSize: 13,
+    display: "flex",
+    alignItems: "center",
+  },
+  centerCard: {
+    borderRadius: 18,
+    backgroundColor: "#fff",
+    border: "1px solid #eee",
+    boxShadow: "0 2px 14px rgba(0,0,0,0.07)",
     padding: 14,
   },
-  qHeader: {
-    display: 'flex',
-    alignItems: 'center',
+  centerCardTop: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  centerMeta: {
+    display: "flex",
+    alignItems: "center",
     gap: 8,
   },
-  qProgress: {
-    marginLeft: 'auto',
+  progressBadge: {
+    marginLeft: "auto",
     fontSize: 12,
-    fontWeight: 700,
-    color: '#4A90D9',
-    background: 'rgba(74,144,217,0.10)',
-    padding: '3px 10px',
+    fontWeight: 900,
+    color: "#4A90D9",
+    background: "rgba(74,144,217,0.10)",
+    padding: "3px 10px",
     borderRadius: 999,
   },
-  qText: {
+  questionText: {
     marginTop: 10,
-    fontSize: 15,
-    fontWeight: 650,
-    color: '#1a1a1a',
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#1a1a1a",
     lineHeight: 1.35,
   },
   respondentsRow: {
-    display: 'flex',
+    display: "flex",
     gap: 8,
-    flexWrap: 'wrap',
+    flexWrap: "wrap",
     marginTop: 12,
   },
   dot: {
     borderRadius: 999,
-    border: '2px solid #ddd',
+    border: "2px solid #ddd",
     padding: 2,
-    background: '#fff',
+    background: "#fff",
   },
   answerArea: {
     marginTop: 12,
-    display: 'flex',
-    flexDirection: 'column',
+    display: "flex",
+    flexDirection: "column",
     gap: 10,
   },
   textarea: {
-    width: '100%',
-    padding: 12,
+    width: "100%",
     borderRadius: 14,
-    border: '2px solid #e0e0e0',
+    border: "1px solid #ddd",
+    padding: 12,
     fontSize: 14,
-    fontFamily: 'inherit',
-    resize: 'none',
-    outline: 'none',
-    boxSizing: 'border-box',
+    resize: "none",
+    outline: "none",
+    fontFamily: "inherit",
   },
   button: {
-    padding: '12px 14px',
+    padding: "12px 16px",
     borderRadius: 14,
-    border: 'none',
-    backgroundColor: '#FF6B6B',
-    color: '#fff',
-    fontSize: 14,
+    border: "none",
+    backgroundColor: "#FF6B6B",
+    color: "#fff",
+    fontSize: 15,
     fontWeight: 700,
-    cursor: 'pointer',
+    cursor: "pointer",
   },
   waitingMessage: {
-    padding: '16px 24px',
+    padding: "14px 16px",
     borderRadius: 14,
-    backgroundColor: '#f0f8ff',
-    color: '#4A90D9',
-    fontSize: 15,
-    fontWeight: 500,
-    marginTop: 20,
-    textAlign: 'center',
+    background: "#f5f5f5",
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#555",
+    textAlign: "center",
+  },
+  waitHint: {
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#777",
+    textAlign: "center",
   },
 };
 
